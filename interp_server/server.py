@@ -36,7 +36,7 @@ NLLB_CODES = {"en": "eng_Latn", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_L
               "hi": "hin_Deva", "cs": "ces_Latn", "ro": "ron_Latn", "hu": "hun_Latn", "el": "ell_Grek", "tr": "tur_Latn",
               "bg": "bul_Cyrl", "sk": "slk_Latn", "uk": "ukr_Cyrl", "ru": "rus_Cyrl"}
 PIPER_VOICES = {"en": "en_GB-alan-medium", "de": "de_DE-thorsten-medium", "fr": "fr_FR-siwis-medium", "es": "es_ES-davefx-medium",
-                "it": "it_IT-riccardo-x_low", "pt": "pt_PT-tugao-medium", "nl": "nl_NL-mls-medium", "pl": "pl_PL-darkman-medium",
+                "it": "it_IT-riccardo-x_low", "pt": "pt_PT-tugão-medium", "nl": "nl_NL-mls-medium", "pl": "pl_PL-darkman-medium",
                 "sv": "sv_SE-nst-medium", "da": "da_DK-talesyntese-medium", "no": "no_NO-talesyntese-medium", "fi": "fi_FI-harri-medium",
                 "cs": "cs_CZ-jirka-medium", "ro": "ro_RO-mihai-medium", "hu": "hu_HU-anna-medium", "el": "el_GR-rapunzelina-low",
                 "tr": "tr_TR-dfki-medium", "uk": "uk_UA-ukrainian_tts-medium", "ru": "ru_RU-irina-medium"}
@@ -89,15 +89,29 @@ def _voice(lang: str):
         raise HTTPException(501, f"no Piper voice for {lang} (interpreter falls back to ElevenLabs)")
     if lang not in _voices:
         from piper import PiperVoice
-        _voices[lang] = PiperVoice.load(os.path.join(VOICE_DIR, PIPER_VOICES[lang] + ".onnx"), use_cuda=DEVICE == "cuda")
+        try:
+            import onnxruntime as ort
+            cuda = DEVICE == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
+        except Exception:  # noqa: BLE001
+            cuda = False
+        _voices[lang] = PiperVoice.load(os.path.join(VOICE_DIR, PIPER_VOICES[lang] + ".onnx"), use_cuda=cuda)
     return _voices[lang]
 
 
 def tts_sync(text: str, lang: str) -> bytes:
+    """WAV bytes. Works with piper-tts 1.3 (synthesize_wav / AudioChunk) and 1.2 (synthesize(text, wav_file))."""
     voice = _voice(lang)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
-        voice.synthesize(text, w)          # piper writes 16-bit mono at the voice's sample rate (22050 for *-medium)
+        if hasattr(voice, "synthesize_wav"):
+            voice.synthesize_wav(text, w)
+        else:
+            rate = voice.config.sample_rate
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+            out = voice.synthesize(text, w)
+            if out is not None:                      # generator of AudioChunk (newer API without synthesize_wav)
+                for chunk in out:
+                    w.writeframes(getattr(chunk, "audio_int16_bytes", chunk))
     return buf.getvalue()
 
 
