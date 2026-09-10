@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Do-not-call · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Do-not-call list</h1>
+{% set me = request.session.get('user') or {} %}
+{% if me.get('role') in ['team_lead','admin'] %}
+<div class="card">
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="post" action="/dnc" class="row">
+    <div><label>Phone (international, +44…)</label><input type="text" name="phone" required></div>
+    <div><label>Reason</label><input type="text" name="reason" value="manual"></div>
+    <div><button type="submit">Add</button></div>
+  </form>
+  <p class="muted" style="margin-bottom:0">Numbers here are never dialled, in any campaign. Daniel adds people automatically when they say they're not interested; add complaints and registry numbers (TPS, Bloctel) by hand.</p>
+</div>
+{% endif %}
+<div class="card"><div class="tbl"><table>
+  <tr><th>Phone</th><th>Reason</th><th>Source</th><th>Added</th><th></th></tr>
+  {% for d in items %}
+  <tr><td class="mono">{{ d.phone }}</td><td>{{ d.reason or '' }}</td><td>{{ d.source or '' }}</td><td class="muted">{{ (d.created_at or '')[:16].replace('T',' ') }}</td>
+      <td>{% if me.get('role') in ['team_lead','admin'] %}<form method="post" action="/dnc/remove" style="display:inline" onsubmit="return confirm('Remove {{ d.phone }} from do-not-call?')"><input type="hidden" name="phone" value="{{ d.phone }}"><button type="submit" class="danger">Remove</button></form>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">Empty.</td></tr>{% endfor %}
+</table></div></div>
+{% endblock %}

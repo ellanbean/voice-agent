@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}into3 voice ops{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% set me = request.session.get('user') or {} %}
+{% set rank = {'pending':0,'agent_sales':1,'agent_payments':1,'team_lead':2,'admin':3} %}
+{% set r = rank.get(me.get('role'), 0) %}
+<header class="top">
+  <a class="brand" href="/">into3 <span>voice ops</span></a>
+  <nav>
+    {% if r >= 1 %}<a href="/console" class="{{ 'on' if request.url.path.startswith('/console') else '' }}">Console</a>{% endif %}
+    <a href="/" class="{{ 'on' if request.url.path == '/' else '' }}">Board</a>
+    {% if r >= 2 %}<a href="/floor" class="{{ 'on' if request.url.path.startswith('/floor') else '' }}">Floor</a>
+    <a href="/reports" class="{{ 'on' if request.url.path.startswith('/reports') else '' }}">Reports</a>
+    <a href="/upload" class="{{ 'on' if request.url.path.startswith('/upload') else '' }}">Upload leads</a>{% endif %}
+    <a href="/calls" class="{{ 'on' if request.url.path.startswith('/calls') else '' }}">Calls</a>
+    {% if r >= 1 %}<a href="/callbacks" class="{{ 'on' if request.url.path.startswith('/callbacks') else '' }}">Callbacks</a>{% endif %}
+    <a href="/dnc" class="{{ 'on' if request.url.path.startswith('/dnc') else '' }}">Do-not-call</a>
+    {% if r >= 3 %}<a href="/users" class="{{ 'on' if request.url.path.startswith('/users') else '' }}">Users</a>{% endif %}
+    <a href="/logout" class="muted">{{ me.get('email','') }} · {{ me.get('role','') }} · log out</a>
+  </nav>
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

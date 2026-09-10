@@ -1,0 +1,14 @@
+livekit-agents[deepgram,elevenlabs,openai,silero]~=1.8
+livekit-api~=1.0
+supabase>=2.10
+runpod>=1.7
+python-dotenv>=1.0
+requests>=2.31
+aiohttp>=3.9
+tzdata>=2024.1
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+python-multipart>=0.0.9
+itsdangerous>=2.2
+openpyxl>=3.1

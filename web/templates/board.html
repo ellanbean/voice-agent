@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Board · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Lead board</h1>
+{% if request.query_params.get('imported') %}<div class="flash">Imported {{ request.query_params.get('imported') }} lead(s) into “{{ campaign }}”. The dialer picks them up on its next pass inside calling hours.</div>{% endif %}
+
+<div class="stats">
+  {% for s in ['new','calling','retry','callback','converted','contacted','not_interested','exhausted','dnc','invalid'] %}
+    {% if counts.get(s) %}<a class="stat" style="text-decoration:none;color:inherit" href="/?campaign={{ campaign }}&status={{ s }}"><b>{{ counts.get(s) }}</b><span>{{ s.replace('_',' ') }}</span></a>{% endif %}
+  {% endfor %}
+</div>
+
+<div class="card">
+  <form class="row" method="get" action="/">
+    <div><label>Campaign</label>
+      <select name="campaign"><option value="">all</option>
+      {% for c in campaigns %}<option value="{{ c.name }}" {{ 'selected' if c.name == campaign }}>{{ c.name }}{{ ' (paused)' if c.paused }}</option>{% endfor %}
+      </select></div>
+    <div><label>Status</label>
+      <select name="status"><option value="">all</option>
+      {% for s in ['new','calling','retry','callback','converted','contacted','not_interested','exhausted','dnc','invalid'] %}
+        <option value="{{ s }}" {{ 'selected' if s == status }}>{{ s }}</option>{% endfor %}
+      </select></div>
+    <div><button type="submit" class="ghost">Filter</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Campaigns</h2>
+  <div class="tbl"><table>
+    <tr><th>Name</th><th>Dialer</th><th></th></tr>
+    {% for c in campaigns %}
+    <tr><td>{{ c.name }}</td>
+        <td>{% if c.paused %}<span class="pill paused">paused</span>{% else %}<span class="pill converted">active</span>{% endif %}</td>
+        <td><form method="post" action="/campaigns/{{ c.name }}/pause" style="display:inline">
+              <input type="hidden" name="paused" value="{{ '0' if c.paused else '1' }}">
+              <button type="submit" class="{{ 'ghost' if c.paused else 'danger' }}">{{ 'Resume' if c.paused else 'Pause' }}</button>
+            </form></td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+<div class="card">
+  <div class="tbl"><table>
+    <tr><th>Name</th><th>Phone</th><th>Country</th><th>Campaign</th><th>Status</th><th>Attempts</th><th>Calls</th><th>Next attempt</th><th>Last outcome</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.name or '—' }}</td>
+      <td class="mono">{{ r.phone }}</td>
+      <td>{{ r.country }}</td>
+      <td>{{ r.campaign }}</td>
+      <td><span class="pill {{ r.status }}">{{ r.status.replace('_',' ') }}</span></td>
+      <td>{{ r.attempts }}</td>
+      <td>{{ r.calls }}</td>
+      <td class="muted">{{ (r.next_attempt or '')[:16].replace('T',' ') }}</td>
+      <td class="muted">{{ r.last_outcome or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">No leads yet. <a href="/upload">Upload a list</a>.</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

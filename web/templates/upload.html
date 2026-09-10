@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Upload leads · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Upload leads</h1>
+
+{% if not preview %}
+<div class="card">
+  <form method="post" action="/upload/preview" enctype="multipart/form-data">
+    <div class="row">
+      <div><label>CSV or Excel file</label><input type="file" name="file" accept=".csv,.xlsx,.xlsm" required></div>
+      <div><label>Campaign</label><input type="text" name="campaign" list="campaigns" value="general" required>
+        <datalist id="campaigns">{% for c in campaigns %}<option value="{{ c.name }}">{% endfor %}</datalist></div>
+      <div><label>Source (if the file has no source column)</label><input type="text" name="source" placeholder="e.g. website demo form"></div>
+    </div>
+    <p><label style="display:inline"><input type="checkbox" name="consent_all" value="1"> Every person in this file has opted in to be contacted (fills <code>consent_at</code> with now where the file has none)</label></p>
+    <p><button type="submit">Check file</button></p>
+  </form>
+  <h2>File format</h2>
+  <p class="muted">Header row with: <code>phone</code> (required, international format <code>+447911123456</code>), <code>country</code> (required, two letters: GB, DE, FR…), and optionally <code>name</code>, <code>company</code>, <code>language</code> (en, de, fr…), <code>source</code>, <code>consent_at</code> (e.g. <code>2026-09-08T10:15:00Z</code>). Extra columns are ignored. Same phone in the same campaign updates the existing lead instead of duplicating it.</p>
+</div>
+
+{% else %}
+<div class="card">
+  <p><b>{{ preview.filename }}</b> → campaign <b>{{ preview.campaign }}</b>:
+     <span class="ok">{{ preview.good|length }} ready to import</span>{% if preview.bad %}, <span class="bad">{{ preview.bad|length }} will be skipped</span>{% endif %}.</p>
+  {% if preview.good %}
+  <form method="post" action="/upload/commit" style="display:inline"><button type="submit">Import {{ preview.good|length }} lead(s)</button></form>
+  {% endif %}
+  <a class="btn ghost" href="/upload">Choose another file</a>
+</div>
+
+{% if preview.bad %}
+<div class="card">
+  <h2 style="margin-top:0" class="bad">Skipped rows — fix in the file and re-upload if you want them</h2>
+  <div class="tbl"><table>
+    <tr><th>Line</th><th>Phone</th><th>Country</th><th>Name</th><th>Problem</th></tr>
+    {% for r in preview.bad %}<tr><td>{{ r.line }}</td><td class="mono">{{ r.phone }}</td><td>{{ r.country }}</td><td>{{ r.name }}</td><td class="bad">{{ r.problems|join('; ') }}</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0">Preview (first 50 of {{ preview.good|length }})</h2>
+  <div class="tbl"><table>
+    <tr><th>Phone</th><th>Name</th><th>Company</th><th>Country</th><th>Language</th><th>Source</th><th>Consent</th></tr>
+    {% for r in preview.good[:50] %}<tr><td class="mono">{{ r.phone }}</td><td>{{ r.name }}</td><td>{{ r.company }}</td><td>{{ r.country }}</td><td>{{ r.language or 'auto' }}</td><td>{{ r.source }}</td><td class="muted">{{ r.consent_at[:16] }}</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

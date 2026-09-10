@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Floor · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Live floor <span class="muted" style="font-size:13px;font-weight:400">refreshes every 5 s</span></h1>
+<div class="card"><div class="tbl"><table id="floor">
+  <tr><th>Agent</th><th>Role</th><th>Language</th><th>Priority</th><th>Status</th><th>Since</th><th>Customer</th><th>Customer language</th><th>On call for</th></tr>
+  {% for r in rows %}
+  <tr><td>{{ r.full_name or r.email }}</td><td>{{ r.role.replace('_',' ') }}</td><td>{{ r.language|upper }}</td><td>{{ r.priority }}</td>
+      <td><span class="pill {{ r.status }}">{{ r.status.replace('_',' ') }}</span></td><td class="muted">{{ (r.status_since or '')[11:16] }}</td>
+      <td>{{ r.customer_name or r.customer_phone or '' }}</td><td>{{ (r.customer_language or '')|upper }}</td><td class="muted">{{ (r.call_started_at or '')[11:16] }}</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">No agents yet. Assign agent roles on the Users page.</td></tr>{% endfor %}
+</table></div></div>
+<script>
+setInterval(async () => {
+  try {
+    const rows = await (await fetch('/api/floor')).json();
+    const fmt = s => (s||'').slice(11,16);
+    document.getElementById('floor').innerHTML = '<tr><th>Agent</th><th>Role</th><th>Language</th><th>Priority</th><th>Status</th><th>Since</th><th>Customer</th><th>Customer language</th><th>On call for</th></tr>' +
+      rows.map(r => `<tr><td>${r.full_name||r.email}</td><td>${(r.role||'').replace('_',' ')}</td><td>${(r.language||'').toUpperCase()}</td><td>${r.priority??''}</td><td><span class="pill ${r.status}">${(r.status||'').replace('_',' ')}</span></td><td class="muted">${fmt(r.status_since)}</td><td>${r.customer_name||r.customer_phone||''}</td><td>${(r.customer_language||'').toUpperCase()}</td><td class="muted">${fmt(r.call_started_at)}</td></tr>`).join('');
+  } catch(e){}
+}, 5000);
+</script>
+{% endblock %}

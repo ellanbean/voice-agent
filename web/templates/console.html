@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}Console · into3 voice ops{% endblock %}
+{% block body %}
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.4/dist/livekit-client.umd.min.js"></script>
+<style>
+.console{display:grid;grid-template-columns:1fr 360px;gap:18px}
+@media(max-width:900px){.console{grid-template-columns:1fr}}
+.status-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#aaa;margin-right:6px}
+.dot.available{background:var(--ok)}.dot.on_call{background:var(--warn)}.dot.ringing{background:var(--bad);animation:blink 1s infinite}.dot.wrap_up{background:#6b5bd6}
+@keyframes blink{50%{opacity:.2}}
+.ring{background:#fff8e6;border:2px solid var(--warn);border-radius:10px;padding:18px;margin-bottom:18px}
+.ring h2{margin:0 0 8px}
+.big{font-size:18px;padding:12px 22px}
+.summary{white-space:pre-wrap;background:var(--accent-soft);padding:12px 14px;border-radius:8px}
+.timer{font-family:var(--mono);font-size:22px}
+textarea{width:100%;min-height:90px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit}
+.hidden{display:none}
+#log{font-family:var(--mono);font-size:12px;color:var(--muted);max-height:120px;overflow:auto}
+.interp{border:2px solid #6b5bd6;background:#f4f2ff}
+#captions{max-height:260px;overflow:auto;font-size:14px}
+.cap{padding:6px 8px;border-bottom:1px solid var(--line)}.cap small{display:block;color:var(--muted);font-size:11px}
+.cap.c2a{background:#fff}.cap.a2c{background:#f7f7f7}.cap .lag{float:right;font-family:var(--mono);font-size:11px;color:var(--muted)}.cap .lag.slow{color:#c0392b}
+.cap.partial{color:var(--muted);font-style:italic}
+.speaking{display:inline-block;padding:2px 8px;border-radius:10px;background:#e8f5e9;color:#1b5e20;font-size:12px}
+.lagbadge{font-family:var(--mono);font-size:13px}
+</style>
+
+<h1>Agent console <span class="muted" style="font-size:14px;font-weight:400">· {{ me.full_name or me.email }} · {{ me.role.replace('_',' ') }} · works in {{ 'Hindi' if me.language == 'hi' else 'English' }} · priority {{ me.priority or 50 }}</span></h1>
+
+<div class="card status-bar">
+  <span><span id="dot" class="dot"></span><b id="statusText">offline</b></span>
+  <button id="btnAvailable" onclick="setStatus('available')">Go available</button>
+  <button id="btnOffline" class="ghost" onclick="setStatus('offline')">Go offline</button>
+  <span class="muted" id="hint">Go available with your headset on. Handovers ring here in priority order. When you accept, the customer hears "connecting you now" — <b>introduce yourself straight away</b>; nobody else will.</span>
+</div>
+
+<div id="ring" class="ring hidden">
+  <h2>Incoming handover</h2>
+  <p><b id="ringName"></b> <span class="mono" id="ringPhone"></span> · language <b id="ringLang"></b></p>
+  <div class="summary" id="ringSummary"></div>
+  <p style="margin-top:12px"><button class="big" onclick="acceptTransfer()">Accept</button> <button class="big ghost" onclick="declineTransfer()">Decline</button></p>
+</div>
+
+<div id="call" class="console hidden">
+  <div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><b id="custName"></b> <span class="mono" id="custPhone"></span> · <span id="custLang"></span></div>
+        <div class="timer" id="timer">00:00</div>
+      </div>
+      <p style="margin:12px 0 0">
+        <button id="btnMute" class="ghost" onclick="toggleMute()">Mute</button>
+        <button id="btnPay" class="ghost" onclick="openPayments()">Transfer to payments</button>
+        <button class="danger" onclick="hangup()">End call</button>
+      </p>
+      <p class="muted" id="callState"></p>
+    </div>
+    <div class="card interp" id="interpBox" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0">Interpreter <span class="muted" style="font-size:13px;font-weight:400" id="interpMeta"></span></h2>
+        <span><span id="custSpeaking" class="speaking" style="display:none">customer speaking…</span> <span class="lagbadge" id="lagBadge">lag —</span></span>
+      </div>
+      <p class="muted" style="margin:6px 0 10px">You hear the customer in <b id="myLang"></b>; they hear you in <b id="theirLang"></b>. Speak in short sentences and pause — each pause is translated. Nobody hears the other side's original voice.
+        <button class="ghost" style="padding:2px 8px;font-size:12px" onclick="toggleOriginal()" id="btnOrig">Hear original (quiet)</button>
+        <select id="langFix" style="font-size:12px" onchange="fixLanguage()"><option value="">wrong language? fix…</option>
+          <option value="en">English</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option><option value="it">Italian</option><option value="pt">Portuguese</option><option value="nl">Dutch</option><option value="pl">Polish</option><option value="sv">Swedish</option><option value="da">Danish</option><option value="no">Norwegian</option><option value="fi">Finnish</option><option value="cs">Czech</option><option value="ro">Romanian</option><option value="hu">Hungarian</option><option value="el">Greek</option></select>
+      </p>
+      <div id="captions"><p class="muted">Live captions appear here.</p></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Daniel's handover summary</h2>
+      <div class="summary" id="summary">—</div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">What Daniel and the customer said</h2>
+      <div id="aiTranscript"><p class="muted">Loading…</p></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2 style="margin-top:0">Lead</h2>
+      <div id="leadBox" class="muted">—</div>
+    </div>
+    <div class="card" id="payBox" style="display:none">
+      <h2 style="margin-top:0">Transfer to payments</h2>
+      <label>Note for the payments colleague</label>
+      <textarea id="paySummary" placeholder="Plan agreed, price quoted, anything promised…"></textarea>
+      <p><button onclick="sendToPayments()">Ring a payments agent</button> <button class="ghost" onclick="document.getElementById('payBox').style.display='none'">Cancel</button></p>
+      <p class="muted" id="payState"></p>
+    </div>
+  </div>
+</div>
+
+<div id="wrap" class="card hidden">
+  <h2 style="margin-top:0">Wrap-up — required before your next call</h2>
+  <div class="row">
+    <div><label>Disposition</label>
+      <select id="disp" onchange="dispChanged()">
+        <option value="sale">Sale</option><option value="callback">Callback requested</option><option value="not_interested">Not interested (adds to do-not-call)</option>
+        <option value="no_decision">No decision yet</option><option value="wrong_person">Wrong person / number</option><option value="dropped">Call dropped</option><option value="other">Other</option>
+      </select></div>
+    <div id="saleFields"><label>Amount</label><input type="text" id="amount" placeholder="49"> <select id="currency"><option>EUR</option><option>GBP</option><option>INR</option><option>USD</option></select></div>
+    <div id="cbFields" style="display:none"><label>Callback when</label><input type="text" id="cbWhen" placeholder="Tomorrow 6pm"></div>
+  </div>
+  <label style="margin-top:10px">Remarks</label>
+  <textarea id="remarks" placeholder="What happened, next step, anything the team lead should know"></textarea>
+  <p><button class="big" onclick="submitWrap()">Save &amp; go available</button></p>
+</div>
+
+<div class="card"><div id="log"></div></div>
+
+<script>
+const LK = window.LivekitClient;
+const LIVEKIT_URL = {{ livekit_url|tojson }};
+let room = null, currentRoom = null, currentTransfer = null, timerInt = null, t0 = null, muted = false, payTransferId = null;
+
+const log = m => { const el = document.getElementById('log'); el.innerHTML = `<div>${new Date().toLocaleTimeString()} ${m}</div>` + el.innerHTML; };
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!r.ok) { const t = await r.text(); throw new Error(`${r.status} ${t}`); }
+  return r.json();
+};
+
+function show(id, on){ document.getElementById(id).classList.toggle('hidden', !on); }
+function paint(status){
+  document.getElementById('dot').className = 'dot ' + (status||'');
+  document.getElementById('statusText').textContent = (status||'offline').replace('_',' ');
+}
+async function setStatus(s){ try { await api('/api/agent/status', {status:s}); paint(s); log('status → '+s); } catch(e){ log('status error: '+e.message); } }
+
+// ---- polling for presence + ringing transfers
+async function poll(){
+  try {
+    const inbox = await api('/api/agent/inbox');
+    if (!room) paint(inbox.status);
+    if (inbox.transfer && !room && !currentTransfer) { currentTransfer = inbox.transfer; showRing(inbox.transfer); }
+    if (!inbox.transfer && currentTransfer && !room) { currentTransfer = null; show('ring', false); }
+    if (room && inbox.status === 'wrap_up') { /* call ended remotely */ await onCallEnded('ended remotely'); }
+  } catch(e){ /* ignore transient */ }
+}
+setInterval(poll, 2000); poll();
+
+function showRing(t){
+  const c = t.calls || {};
+  document.getElementById('ringName').textContent = c.lead_name || 'Customer';
+  document.getElementById('ringPhone').textContent = c.phone || '';
+  document.getElementById('ringLang').textContent = (c.language || 'unknown').toUpperCase();
+  document.getElementById('ringSummary').textContent = t.summary || c.summary || '';
+  show('ring', true); paint('ringing');
+  try { const ac = new (window.AudioContext||window.webkitAudioContext)(); const o = ac.createOscillator(); const g = ac.createGain(); o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(ac.destination); o.start(); setTimeout(()=>{o.stop(); ac.close();}, 600); } catch(e){}
+}
+
+async function acceptTransfer(){
+  if (!currentTransfer) return;
+  try {
+    const res = await api(`/api/transfers/${currentTransfer.id}/accept`, {});
+    show('ring', false);
+    await joinRoom(res.url || LIVEKIT_URL, res.token, res.room, res.context, res.interpreter);
+  } catch(e){ log('accept failed: '+e.message); currentTransfer = null; show('ring', false); }
+}
+async function declineTransfer(){
+  if (!currentTransfer) return;
+  try { await api(`/api/transfers/${currentTransfer.id}/decline`, {}); } catch(e){}
+  currentTransfer = null; show('ring', false); paint('available');
+}
+
+// ---- LiveKit
+let interp = null, lags = [], hearOriginal = false;
+const isAgentIdent = id => id && id.startsWith('human-');   // colleagues on the console (Daniel's worker is agent-…)
+
+function allowedListeners(){
+  // Who may subscribe to MY microphone: with the interpreter, only it (and other agents) — never the customer directly.
+  const list = [{ participantIdentity: interp.identity, allowAll: true }];
+  room.remoteParticipants.forEach(p => { if (isAgentIdent(p.identity)) list.push({ participantIdentity: p.identity, allowAll: true }); });
+  return list;
+}
+function wantTrack(pub, participant){
+  if (!interp || !interp.enabled) return true;
+  if (participant.identity === interp.identity) return pub.trackName === 'to_agent_' + interp.my_language;
+  if (isAgentIdent(participant.identity)) return true;                       // colleagues (payments handover) — raw
+  return hearOriginal;                                                        // the customer's original voice: only if toggled on, quietly
+}
+
+async function joinRoom(url, token, roomName, ctx, interpInfo){
+  interp = interpInfo || { enabled: false };
+  lags = []; hearOriginal = false;
+  room = new LK.Room({ adaptiveStream: false, dynacast: false });
+  room.on(LK.RoomEvent.TrackPublished, (pub, participant) => { if (wantTrack(pub, participant)) pub.setSubscribed(true); });
+  room.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+    if (track.kind !== 'audio') return;
+    if (interp.enabled && !wantTrack(pub, participant)) { pub.setSubscribed(false); return; }
+    const el = track.attach(); el.id = 'audio-'+participant.identity+'-'+pub.trackSid; document.body.appendChild(el);
+    if (participant.identity !== interp.identity && !isAgentIdent(participant.identity) && interp.enabled) el.volume = 0.12;
+    log('hearing '+participant.identity+(pub.trackName ? ' ('+pub.trackName+')' : ''));
+  });
+  room.on(LK.RoomEvent.ParticipantConnected, p => { if (interp.enabled && isAgentIdent(p.identity)) room.localParticipant.setTrackSubscriptionPermissions(false, allowedListeners()); });
+  room.on(LK.RoomEvent.ParticipantDisconnected, p => { log(p.identity+' left'); if (p.identity === 'callee') onCallEnded('customer hung up'); });
+  room.on(LK.RoomEvent.Disconnected, () => { if (room) onCallEnded('disconnected'); });
+  room.on(LK.RoomEvent.DataReceived, (payload, participant, kind, topic) => { if (topic === 'captions') onCaption(JSON.parse(new TextDecoder().decode(payload))); });
+  await room.connect(url, token, { autoSubscribe: !interp.enabled });
+  if (interp.enabled) {
+    room.localParticipant.setTrackSubscriptionPermissions(false, allowedListeners());   // set BEFORE the mic goes live: no leak, ever
+    room.remoteParticipants.forEach(p => p.trackPublications.forEach(pub => { if (wantTrack(pub, p)) pub.setSubscribed(true); }));
+    document.getElementById('interpBox').style.display = '';
+    document.getElementById('myLang').textContent = interp.my_language === 'hi' ? 'Hindi' : 'English';
+    document.getElementById('theirLang').textContent = (interp.customer_language||'?').toUpperCase();
+    document.getElementById('interpMeta').textContent = interp.error ? interp.error : 'connecting…';
+    document.getElementById('captions').innerHTML = '<p class="muted">Live captions appear here.</p>';
+  } else {
+    document.getElementById('interpBox').style.display = 'none';
+  }
+  await room.localParticipant.setMicrophoneEnabled(true);
+  currentRoom = roomName; muted = false;
+  paint('on_call'); show('call', true); show('wrap', false);
+  t0 = Date.now(); timerInt = setInterval(()=>{ const s = Math.floor((Date.now()-t0)/1000); document.getElementById('timer').textContent = String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }, 1000);
+  renderContext(ctx); log('joined '+roomName+(interp.enabled ? ' with interpreter' : ''));
+}
+
+function onCaption(m){
+  const box = document.getElementById('captions');
+  if (m.type === 'ready') { document.getElementById('interpMeta').textContent = 'live · customer '+(m.customer_language||'').toUpperCase(); interp.customer_language = m.customer_language; document.getElementById('theirLang').textContent = (m.customer_language||'?').toUpperCase(); return; }
+  if (m.type === 'speaking') { if (m.lane === 'c2a') document.getElementById('custSpeaking').style.display = m.on ? '' : 'none'; return; }
+  if (m.type === 'partial') { let p = document.getElementById('partial'); if (!p) { p = document.createElement('div'); p.id = 'partial'; p.className = 'cap partial'; box.prepend(p); } p.textContent = m.src; return; }
+  if (m.type === 'caption') {
+    const p = document.getElementById('partial'); if (p) p.remove();
+    if (box.firstElementChild && box.firstElementChild.tagName === 'P') box.innerHTML = '';
+    const d = document.createElement('div'); d.className = 'cap '+m.lane;
+    const lag = m.total_ms == null ? '' : `<span class="lag ${m.total_ms > 1000 ? 'slow' : ''}">${m.total_ms} ms${m.merged > 1 ? ' · merged' : ''}</span>`;
+    d.innerHTML = `${lag}<small>${m.lane === 'c2a' ? 'customer' : 'you'}</small>${m.error ? '<i>'+m.error+'</i> — ' : ''}${m.lane === 'c2a' ? (m.dst_text||'') : (m.src_text||'')}<small>${m.lane === 'c2a' ? (m.src_text||'') : '→ '+(m.dst_text||'')}</small>`;
+    box.prepend(d); while (box.children.length > 60) box.lastElementChild.remove();
+    if (m.total_ms != null) { lags.push(m.total_ms); const s = [...lags].sort((a,b)=>a-b); const p50 = s[Math.floor((s.length-1)*0.5)], p95 = s[Math.floor((s.length-1)*0.95)];
+      const b = document.getElementById('lagBadge'); b.textContent = `lag ${m.total_ms} ms · p50 ${p50} · p95 ${p95}`; b.style.color = p95 > 1000 ? '#c0392b' : 'inherit'; }
+  }
+}
+function toggleOriginal(){
+  hearOriginal = !hearOriginal; document.getElementById('btnOrig').textContent = hearOriginal ? 'Mute original' : 'Hear original (quiet)';
+  room.remoteParticipants.forEach(p => { if (p.identity === 'callee') p.trackPublications.forEach(pub => pub.setSubscribed(hearOriginal)); });
+}
+async function fixLanguage(){
+  const lang = document.getElementById('langFix').value; if (!lang || !currentRoom) return;
+  try { await api(`/api/calls/${currentRoom}/customer-language`, { language: lang }); log('customer language set to '+lang); } catch(e){ log('language fix failed: '+e.message); }
+  document.getElementById('langFix').value = '';
+}
+
+function renderContext(ctx){
+  const c = ctx.call || {}, lead = ctx.lead || {};
+  document.getElementById('custName').textContent = c.lead_name || lead.name || 'Customer';
+  document.getElementById('custPhone').textContent = c.phone || '';
+  document.getElementById('custLang').textContent = 'speaks ' + (c.language || '?').toUpperCase();
+  document.getElementById('summary').textContent = c.summary || '—';
+  document.getElementById('leadBox').innerHTML = lead.id ? `${lead.company ? '<b>'+lead.company+'</b><br>' : ''}${lead.country||''} · source: ${lead.source||'—'}<br>campaign: ${lead.campaign||''}` : '—';
+  const items = (c.transcript && c.transcript.items) || [];
+  const html = items.filter(i => i.type === 'message').map(i => {
+    const text = Array.isArray(i.content) ? i.content.map(x => typeof x === 'string' ? x : (x.text||'')).join(' ') : (i.content||'');
+    return `<div class="turn ${i.role}"><small>${i.role === 'assistant' ? (c.voice||'Daniel') : 'customer'}</small>${text}</div>`;
+  }).join('');
+  document.getElementById('aiTranscript').innerHTML = html || '<p class="muted">No AI transcript yet.</p>';
+}
+
+async function toggleMute(){ if (!room) return; muted = !muted; await room.localParticipant.setMicrophoneEnabled(!muted); document.getElementById('btnMute').textContent = muted ? 'Unmute' : 'Mute'; }
+
+function openPayments(){ document.getElementById('payBox').style.display = 'block'; }
+async function sendToPayments(){
+  try {
+    const res = await api(`/api/calls/${currentRoom}/transfer-to-payments`, { summary: document.getElementById('paySummary').value });
+    payTransferId = res.transfer_id;
+    document.getElementById('payState').textContent = `Ringing ${res.agent}… stay on the line and introduce them when they join.`;
+    const started = Date.now();
+    const iv = setInterval(async () => {
+      try {
+        const t = await api(`/api/transfers/${payTransferId}`);
+        if (t.status === 'accepted') { clearInterval(iv); document.getElementById('payState').innerHTML = `They're on the call. Introduce them, then <button class="ghost" onclick="leaveAfterPayments()">leave the call</button>.`; }
+        else if (t.status !== 'ringing') { clearInterval(iv); document.getElementById('payState').textContent = 'They didn\'t pick up. Try again or handle it yourself.'; }
+        else if (Date.now() - started > 45000) { clearInterval(iv); await api(`/api/transfers/${payTransferId}/cancel`, {}); document.getElementById('payState').textContent = 'No answer after 45s.'; }
+      } catch(e){ clearInterval(iv); }
+    }, 1500);
+  } catch(e){ document.getElementById('payState').textContent = e.message.includes('409') ? 'No payments agent is available right now.' : e.message; }
+}
+async function leaveAfterPayments(){
+  try { await api(`/api/calls/${currentRoom}/leave`, {}); } catch(e){}
+  await teardown(); show('wrap', true); paint('wrap_up'); log('left call; customer stays with payments');
+}
+async function hangup(){
+  if (!currentRoom) return;
+  try { await api(`/api/calls/${currentRoom}/hangup`, {}); } catch(e){ log('hangup: '+e.message); }
+  await onCallEnded('you ended the call');
+}
+async function teardown(){
+  clearInterval(timerInt);
+  if (room) { const r = room; room = null; try { await r.disconnect(); } catch(e){} }
+  document.querySelectorAll('audio[id^="audio-"]').forEach(a => a.remove());
+  document.getElementById('custSpeaking').style.display = 'none'; document.getElementById('lagBadge').textContent = 'lag —';
+  show('call', false); currentTransfer = null; interp = null;
+}
+async function onCallEnded(reason){
+  if (!currentRoom) return;
+  log('call ended: '+reason);
+  await teardown(); show('wrap', true); paint('wrap_up');
+}
+
+// ---- wrap-up
+function dispChanged(){ const d = document.getElementById('disp').value; document.getElementById('saleFields').style.display = d === 'sale' ? '' : 'none'; document.getElementById('cbFields').style.display = d === 'callback' ? '' : 'none'; }
+dispChanged();
+async function submitWrap(){
+  const body = { disposition: document.getElementById('disp').value, remarks: document.getElementById('remarks').value,
+                 sale_amount: document.getElementById('amount').value, currency: document.getElementById('currency').value, callback_when: document.getElementById('cbWhen').value };
+  try { await api(`/api/calls/${currentRoom}/wrapup`, body); show('wrap', false); paint('available'); currentRoom = null;
+        document.getElementById('remarks').value = ''; document.getElementById('amount').value = ''; log('wrap-up saved; available'); }
+  catch(e){ log('wrap-up failed: '+e.message); }
+}
+window.addEventListener('beforeunload', () => { if (!room) navigator.sendBeacon && fetch('/api/agent/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status:'offline'}), keepalive:true}); });
+</script>
+{% endblock %}

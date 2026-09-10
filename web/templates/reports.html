@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Reports · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Agent performance <span class="muted" style="font-size:13px;font-weight:400">last {{ days }} days</span></h1>
+<p><a class="btn {{ 'ghost' if days != 1 }}" href="/reports?days=1">Today</a> <a class="btn {{ 'ghost' if days != 7 }}" href="/reports?days=7">7 days</a> <a class="btn {{ 'ghost' if days != 30 }}" href="/reports?days=30">30 days</a></p>
+<div class="card"><div class="tbl"><table>
+  <tr><th>Agent</th><th>Role</th><th>Calls handled</th><th>Talk time</th><th>Avg handle time</th><th>Sales</th><th>Revenue</th><th>Callbacks</th><th>Conversion</th></tr>
+  {% for r in rows %}
+  <tr><td>{{ r.name }}</td><td>{{ (r.role or '').replace('_',' ') }}</td><td>{{ r.calls }}</td>
+      <td>{{ r.talk_s // 3600 }}h {{ (r.talk_s % 3600) // 60 }}m</td><td>{{ r.avg_handle_s // 60 }}m {{ r.avg_handle_s % 60 }}s</td>
+      <td>{{ r.sales }}</td><td>{{ '%.0f'|format(r.revenue) }}</td><td>{{ r.callbacks }}</td>
+      <td>{{ '%.0f'|format(100 * r.sales / r.calls) if r.calls else 0 }}%</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">No human-handled calls in this period.</td></tr>{% endfor %}
+</table></div></div>
+<p class="muted">Counts each human segment (sales or payments) once. AI-only calls appear under Calls, not here.</p>
+
+<h2>Interpreter latency <span class="muted" style="font-size:13px;font-weight:400">{{ interp.segments }} translated segments, {{ interp.merged }} merged under backlog</span></h2>
+<div class="stats">
+  <div class="stat"><b>{{ interp.total_ms.p50 if interp.total_ms.p50 is not none else '—' }} ms</b><span>lag p50</span></div>
+  <div class="stat"><b style="color:{{ '#c0392b' if (interp.total_ms.p95 or 0) > 1000 else 'inherit' }}">{{ interp.total_ms.p95 if interp.total_ms.p95 is not none else '—' }} ms</b><span>lag p95 (target &lt; 1000)</span></div>
+  <div class="stat"><b>{{ interp.mt_ms.p50 if interp.mt_ms.p50 is not none else '—' }} ms</b><span>translation p50</span></div>
+  <div class="stat"><b>{{ interp.tts_ms.p50 if interp.tts_ms.p50 is not none else '—' }} ms</b><span>voice p50</span></div>
+  <div class="stat"><b>{{ interp.queued_ms.p95 if interp.queued_ms.p95 is not none else '—' }} ms</b><span>queue wait p95</span></div>
+  <div class="stat"><b>{{ interp.c2a.p50 or '—' }} / {{ interp.a2c.p50 or '—' }}</b><span>customer→agent / agent→customer p50</span></div>
+</div>
+{% endblock %}

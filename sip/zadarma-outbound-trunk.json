@@ -1,0 +1,9 @@
+{
+  "trunk": {
+    "name": "zadarma-outbound",
+    "address": "sip.zadarma.com",
+    "numbers": ["+44XXXXXXXXXX"],
+    "auth_username": "ZADARMA_SIP_LOGIN",
+    "auth_password": "ZADARMA_SIP_PASSWORD"
+  }
+}

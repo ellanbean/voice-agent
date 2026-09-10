@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Call · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Call {{ (call.started_at or '')[:16].replace('T',' ') }} · <span class="mono">{{ call.phone or '' }}</span></h1>
+<div class="stats">
+  <div class="stat"><b>{{ (call.status or 'in progress').replace('_',' ') }}</b><span>outcome</span></div>
+  <div class="stat"><b>{{ call.voice or '—' }}</b><span>voice</span></div>
+  <div class="stat"><b>{% if call.duration_s %}{{ call.duration_s // 60 }}m {{ call.duration_s % 60 }}s{% else %}—{% endif %}</b><span>duration</span></div>
+  <div class="stat"><b class="mono" style="font-size:13px">{{ (call.trunk_id or '—')[:14] }}</b><span>trunk</span></div>
+</div>
+{% if call.outcome %}
+<div class="card"><h2 style="margin-top:0">Disposition</h2>
+  <div class="tbl"><table>{% for k, v in call.outcome.items() %}<tr><th style="width:160px">{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}</table></div>
+</div>
+{% endif %}
+<div class="card"><h2 style="margin-top:0">Transcript</h2>
+  {% for t in turns %}
+    <div class="turn {{ t.role }}"><small>{{ (call.voice or 'agent') if t.role == 'assistant' else ('caller' if t.role == 'user' else t.role) }}</small>{{ t.text }}</div>
+  {% else %}<p class="muted">No transcript recorded (call may not have connected).</p>{% endfor %}
+</div>
+{% if interp %}
+<div class="card"><h2 style="margin-top:0">Interpreter <span class="muted" style="font-size:13px;font-weight:400">customer {{ (call.language or '?')|upper }}
+  {% if call.interp_stats %}· p50 {{ call.interp_stats.p50_ms }} ms · p95 {{ call.interp_stats.p95_ms }} ms · {{ call.interp_stats.segments }} segments{% endif %}</span></h2>
+  <div class="tbl"><table>
+    <tr><th>Who</th><th>Said</th><th>Heard as</th><th>Lag</th><th>MT</th><th>TTS</th><th>Queued</th></tr>
+    {% for s in interp %}
+    <tr><td>{{ 'customer' if s.lane == 'c2a' else 'agent' }}</td><td>{{ s.src_text }}</td><td>{{ s.dst_text }}</td>
+        <td class="mono" style="color:{{ '#c0392b' if (s.total_ms or 0) > 1000 else 'inherit' }}">{{ s.total_ms }} ms</td>
+        <td class="muted">{{ s.mt_ms }}</td><td class="muted">{{ s.tts_ms }}</td><td class="muted">{{ s.queued_ms }}{% if s.merged > 1 %} (merged {{ s.merged }}){% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="muted">Lag = from the moment speech-to-text finalised a clause to the first translated audio frame on the line. Add ~{{ 300 }} ms of end-of-clause silence detection before it for what the listener perceives.</p>
+</div>
+{% endif %}
+<p><a href="/calls">← all calls</a></p>
+{% endblock %}

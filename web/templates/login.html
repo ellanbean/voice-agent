@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ 'Create account' if mode == 'signup' else 'Sign in' }} · into3 voice ops</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><main><div class="card login">
+  <h1>into3 voice ops</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if mode == 'signup' %}
+  <form method="post" action="/signup">
+    <label for="full_name">Full name (as it should appear on the floor and in reports)</label><input id="full_name" type="text" name="full_name" style="width:100%" required>
+    <div class="row" style="margin-top:10px"><div style="flex:1"><label for="phone">Mobile</label><input id="phone" type="text" name="phone" style="width:100%"></div>
+    <div style="flex:1"><label for="employee_code">Employee code (optional)</label><input id="employee_code" type="text" name="employee_code" style="width:100%"></div></div>
+    <label for="email" style="margin-top:10px">Work email</label><input id="email" type="text" name="email" style="width:100%" autofocus>
+    <label for="password" style="margin-top:10px">Password (8+ characters)</label><input id="password" type="password" name="password" style="width:100%">
+    <p><button type="submit">Create account</button></p>
+    <p class="muted" style="font-size:13px">New accounts start as <b>pending</b> with no access; an admin assigns your role and language. Already registered? <a href="/login">Sign in</a>.</p>
+  </form>
+  {% else %}
+  <form method="post" action="/login">
+    <label for="email">Email</label><input id="email" type="text" name="email" style="width:100%" autofocus>
+    <label for="password" style="margin-top:10px">Password</label><input id="password" type="password" name="password" style="width:100%">
+    <p><button type="submit">Sign in</button></p>
+    <p class="muted" style="font-size:13px">No account yet? <a href="/signup">Create one</a>.</p>
+  </form>
+  {% endif %}
+</div></main></body></html>

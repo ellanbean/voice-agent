@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Callbacks · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Callbacks for the human team</h1>
+<p><a class="btn {{ 'ghost' if mine else '' }}" href="/callbacks">All open</a> <a class="btn {{ '' if mine else 'ghost' }}" href="/callbacks?mine=1">Assigned to me</a></p>
+<div class="card"><div class="tbl"><table>
+  <tr><th>Requested</th><th>Person</th><th>Phone</th><th>Country</th><th>When they asked for</th><th>Note</th><th>Assigned</th><th></th></tr>
+  {% for cb in items %}
+  <tr>
+    <td class="muted">{{ (cb.created_at or '')[:16].replace('T',' ') }}</td>
+    <td>{{ cb.leads.name if cb.leads else '—' }}</td>
+    <td class="mono">{{ cb.leads.phone if cb.leads else '' }}</td>
+    <td>{{ cb.leads.country if cb.leads else '' }}</td>
+    <td><b>{{ cb.requested_for }}</b></td>
+    <td>{{ cb.note or '' }}</td>
+    <td>
+      <form method="post" action="/callbacks/{{ cb.id }}/assign" class="row" style="gap:6px">
+        <select name="user_id"><option value="">— unassigned —</option>
+          {% for p in people %}<option value="{{ p.id }}" {{ 'selected' if cb.assigned_to_id == p.id }}>{{ p.full_name or p.email }}</option>{% endfor %}
+        </select><button type="submit" class="ghost">Assign</button>
+      </form>
+    </td>
+    <td>{% if cb.call_id %}<a href="/calls/{{ cb.call_id }}">transcript</a> · {% endif %}
+        <form method="post" action="/callbacks/{{ cb.id }}/done" style="display:inline"><button type="submit" class="ghost">Done</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted">Nothing waiting.</td></tr>{% endfor %}
+</table></div></div>
+{% endblock %}

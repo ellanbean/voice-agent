@@ -1,0 +1,10 @@
+{
+  "_comment": "Second carrier for failover — fill in when you have it (Plivo Zentrunk, Twilio Elastic SIP, etc.). Then: lk sip outbound create sip/route2-outbound-trunk.json and append the ID to SIP_OUTBOUND_TRUNK_IDS.",
+  "trunk": {
+    "name": "route2-outbound",
+    "address": "SIP_HOST_OF_SECOND_CARRIER",
+    "numbers": ["+44XXXXXXXXXX"],
+    "auth_username": "USERNAME",
+    "auth_password": "PASSWORD"
+  }
+}

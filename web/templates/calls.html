@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Calls · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Calls</h1>
+<div class="card"><div class="tbl"><table>
+  <tr><th>Started</th><th>Phone</th><th>Status</th><th>Voice</th><th>Duration</th><th>Trunk</th><th></th></tr>
+  {% for c in calls %}
+  <tr>
+    <td class="muted">{{ (c.started_at or '')[:16].replace('T',' ') }}</td>
+    <td class="mono">{{ c.phone or '' }}</td>
+    <td><span class="pill {{ c.status or '' }}">{{ (c.status or 'in progress').replace('_',' ') }}</span></td>
+    <td>{{ c.voice or '' }}</td>
+    <td>{% if c.duration_s %}{{ c.duration_s // 60 }}m {{ c.duration_s % 60 }}s{% endif %}</td>
+    <td class="mono muted">{{ (c.trunk_id or '')[:12] }}</td>
+    <td><a href="/calls/{{ c.id }}">transcript</a></td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">No calls yet.</td></tr>{% endfor %}
+</table></div></div>
+{% endblock %}

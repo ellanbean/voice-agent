@@ -1,0 +1,21 @@
+{
+  "_comment": "Placeholder pricing so the tool works end-to-end. Replace with your real plans or point get_current_offer at your pricing API.",
+  "DEFAULT": {
+    "currency": "EUR",
+    "plans": [
+      {"name": "Starter", "price_per_month": 29, "includes": "AI doubt-solving, unlimited questions, progress reports"},
+      {"name": "Plus", "price_per_month": 49, "includes": "Everything in Starter plus live counsellor sessions twice a month"}
+    ],
+    "promotion": "First month free when they sign up during the call.",
+    "trial": "7-day free trial, no card needed."
+  },
+  "GB": {
+    "currency": "GBP",
+    "plans": [
+      {"name": "Starter", "price_per_month": 25, "includes": "AI doubt-solving, unlimited questions, progress reports"},
+      {"name": "Plus", "price_per_month": 42, "includes": "Everything in Starter plus live counsellor sessions twice a month"}
+    ],
+    "promotion": "First month free when they sign up during the call.",
+    "trial": "7-day free trial, no card needed."
+  }
+}

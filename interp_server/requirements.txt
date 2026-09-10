@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+faster-whisper>=1.1
+transformers>=4.44
+torch
+sentencepiece
+piper-tts
+webrtcvad-wheels
+numpy
+huggingface_hub

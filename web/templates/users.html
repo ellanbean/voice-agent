@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Users · into3 voice ops{% endblock %}
+{% block body %}
+<h1>Users &amp; roles</h1>
+<div class="card">
+  <p class="muted"><b>Priority</b> decides who gets the next handover: the available agent with the lowest number rings first (1 = best), ties go to whoever has waited longest. Team leads set priority; admins also set roles and language. New signups are <i>pending</i> until a role is assigned. Language is the agent's working language (English/Hindi) for the interpreter.</p>
+  <div class="tbl"><table>
+    <tr><th>Name</th><th>Contact</th><th>Role · language</th><th>Priority</th><th>Status</th><th>Joined</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td><b>{{ u.full_name or '—' }}</b>{% if u.employee_code %}<br><span class="muted mono">{{ u.employee_code }}</span>{% endif %}</td>
+      <td>{{ u.email }}{% if u.phone %}<br><span class="muted mono">{{ u.phone }}</span>{% endif %}</td>
+      <td>
+        {% if is_admin %}
+        <form method="post" action="/users/{{ u.id }}/role" class="row" style="gap:6px">
+          <select name="role">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == u.role }}>{{ r.replace('_',' ') }}</option>{% endfor %}</select>
+          <select name="language">{% for l in langs %}<option value="{{ l }}" {{ 'selected' if l == (u.language or 'en') }}>{{ 'Hindi' if l == 'hi' else 'English' }}</option>{% endfor %}</select>
+          <button type="submit" class="ghost">Save</button>
+        </form>
+        {% else %}{{ u.role.replace('_',' ') }} · {{ 'Hindi' if u.language == 'hi' else 'English' }}{% endif %}
+      </td>
+      <td>{% if u.role in ['agent_sales','agent_payments'] %}
+        <form method="post" action="/users/{{ u.id }}/priority" class="row" style="gap:6px">
+          <input type="number" name="priority" value="{{ u.priority or 50 }}" min="1" max="999" style="width:70px;min-width:0"><button type="submit" class="ghost">Set</button>
+        </form>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><span class="pill {{ u.status or 'offline' }}">{{ (u.status or 'offline').replace('_',' ') }}</span></td>
+      <td class="muted">{{ (u.created_at or '')[:10] }}</td>
+      <td>{% if is_admin and u.id != me.id %}<form method="post" action="/users/{{ u.id }}/delete" onsubmit="return confirm('Delete {{ u.email }}?')"><button type="submit" class="danger">Delete</button></form>{% else %}<span class="muted">you</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}
