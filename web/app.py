@@ -483,6 +483,43 @@ async def api_transfer_accept(transfer_id: str, user: dict = Depends(require("ag
     return {"ok": True, "room": t["room"], "token": token, "url": os.getenv("LIVEKIT_URL", ""), "context": ctx, "interpreter": interp}
 
 
+# ---- simulator: a browser plays the customer so the whole flow runs without a SIP trunk
+@app.get("/sim", response_class=HTMLResponse)
+def sim_page(request: Request, user: dict = Depends(require("team_lead"))):
+    return templates.TemplateResponse(request, "sim.html", {"livekit_url": os.getenv("LIVEKIT_URL", "")})
+
+
+@app.post("/api/sim/start")
+async def api_sim_start(payload: dict, user: dict = Depends(require("team_lead"))):
+    """Create a test lead, dispatch Daniel into a fresh room in sim mode, and hand the browser a 'callee' token."""
+    name = (payload.get("name") or "Test Customer").strip()
+    country = (payload.get("country") or "DE").upper()[:2]
+    language = (payload.get("language") or COUNTRY_LANG.get(country, "en")).lower()[:2]
+    phone = f"+000{secrets.randbelow(10**9):09d}"                     # unique fake number per run
+    lead = db.upsert_lead({"phone": phone, "name": name, "country": country, "language": language, "source": "simulator",
+                           "consent_at": datetime.now(timezone.utc).isoformat(), "campaign": "sim", "status": "calling"})
+    room = f"sim-{secrets.token_hex(4)}"
+    meta = {"sim": True, "phone": phone, "lead_id": lead["id"], "name": name, "country": country, "language": language,
+            "source": "simulator", "campaign": "sim", "company": payload.get("company") or ""}
+    lk = lk_api.LiveKitAPI()
+    try:
+        await lk.agent_dispatch.create_dispatch(lk_api.CreateAgentDispatchRequest(agent_name=os.getenv("AGENT_NAME", "sales-caller"), room=room, metadata=_json.dumps(meta)))
+    finally:
+        await lk.aclose()
+    token = _lk_token("callee", name, room)
+    return {"ok": True, "room": room, "token": token, "url": os.getenv("LIVEKIT_URL", ""), "lead": lead}
+
+
+@app.post("/api/sim/{room}/hangup")
+async def api_sim_hangup(room: str, user: dict = Depends(require("team_lead"))):
+    await _delete_room(room)
+    try:
+        db.end_call(room)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True}
+
+
 @app.post("/api/calls/{room}/customer-language")
 async def api_set_customer_language(room: str, payload: dict, user: dict = Depends(require("agent"))):
     """Agent corrects the detected language mid-call (e.g. Daniel heard Dutch, it's actually German)."""

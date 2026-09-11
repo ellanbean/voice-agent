@@ -56,11 +56,19 @@ def load():
     _nllb = AutoModelForSeq2SeqLM.from_pretrained(NLLB_MODEL, torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32).to(DEVICE).eval()
     # warm-up
     translate_sync("Hallo, wie geht es Ihnen?", "de", "en")
+    import threading
+    threading.Thread(target=warm_voices, daemon=True).start()
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "whisper": WHISPER_MODEL, "nllb": NLLB_MODEL, "piper_langs": sorted(PIPER_VOICES), "device": DEVICE}
+    try:
+        import onnxruntime as ort
+        piper_cuda = "CUDAExecutionProvider" in ort.get_available_providers()
+    except Exception:  # noqa: BLE001
+        piper_cuda = False
+    return {"ok": True, "whisper": WHISPER_MODEL, "nllb": NLLB_MODEL, "piper_langs": sorted(PIPER_VOICES), "device": DEVICE,
+            "piper_cuda": piper_cuda, "voices_loaded": sorted(_voices)}
 
 
 # ------------------------------------------------------------------ MT
@@ -99,26 +107,73 @@ def _voice(lang: str):
 
 
 def tts_sync(text: str, lang: str) -> bytes:
-    """WAV bytes. Works with piper-tts 1.3 (synthesize_wav / AudioChunk) and 1.2 (synthesize(text, wav_file))."""
+    """Whole WAV (used by /tts and warm-up). piper-tts >= 1.3 API, with a fallback for 1.2."""
     voice = _voice(lang)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         if hasattr(voice, "synthesize_wav"):
             voice.synthesize_wav(text, w)
         else:
-            rate = voice.config.sample_rate
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
-            out = voice.synthesize(text, w)
-            if out is not None:                      # generator of AudioChunk (newer API without synthesize_wav)
-                for chunk in out:
-                    w.writeframes(getattr(chunk, "audio_int16_bytes", chunk))
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(voice.config.sample_rate)
+            voice.synthesize(text, w)
     return buf.getvalue()
+
+
+def tts_chunks(text: str, lang: str):
+    """Raw 16-bit PCM, one chunk per sentence as Piper produces it — the client starts playing after the first."""
+    voice = _voice(lang)
+    if hasattr(voice, "synthesize_wav"):                  # >= 1.3: synthesize() yields AudioChunk
+        for chunk in voice.synthesize(text):
+            yield chunk.audio_int16_bytes
+    else:
+        yield tts_sync(text, lang)[44:]
 
 
 @app.post("/tts")
 async def tts(body: dict):
     wav = await asyncio.to_thread(tts_sync, body["text"], body.get("lang", "en"))
     return Response(content=wav, media_type="audio/wav")
+
+
+@app.post("/tts/stream")
+async def tts_stream(body: dict):
+    """Streaming variant used by interpreter.py: header X-Sample-Rate, body = raw PCM s16le mono."""
+    lang = body.get("lang", "en")
+    voice = _voice(lang)
+    q: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def produce():
+        try:
+            for pcm in tts_chunks(body["text"], lang):
+                loop.call_soon_threadsafe(q.put_nowait, pcm)
+        finally:
+            loop.call_soon_threadsafe(q.put_nowait, None)
+
+    asyncio.get_running_loop().run_in_executor(None, produce)
+
+    async def gen():
+        while True:
+            pcm = await q.get()
+            if pcm is None:
+                return
+            yield pcm
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(gen(), media_type="application/octet-stream",
+                             headers={"X-Sample-Rate": str(voice.config.sample_rate)})
+
+
+def warm_voices():
+    """Load + run the common voices once so the first real call does not pay ~1-3 s."""
+    for lang in os.getenv("PIPER_WARM", "en,de,fr,es,it,nl,pl").split(","):
+        lang = lang.strip()
+        if lang in PIPER_VOICES and os.path.exists(os.path.join(VOICE_DIR, PIPER_VOICES[lang] + ".onnx")):
+            try:
+                t0 = time.monotonic(); tts_sync("Hello, one moment please.", lang)
+                print(f"warm {lang}: {int((time.monotonic() - t0) * 1000)} ms", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print("warm-up failed", lang, e, flush=True)
 
 
 # ------------------------------------------------------------------ STT (streaming over websocket, clause-level finals)

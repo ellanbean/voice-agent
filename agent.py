@@ -505,7 +505,21 @@ async def entrypoint(ctx: JobContext):
 
     await session.start(agent, room=ctx.room)
 
-    if phone:
+    if meta.get("sim"):
+        # Simulator: no SIP. A browser joins as "callee" (web /sim page) and plays the customer.
+        deadline = time.time() + 90
+        while time.time() < deadline and "callee" not in ctx.room.remote_participants:
+            await asyncio.sleep(0.5)
+        if "callee" not in ctx.room.remote_participants:
+            agent.outcome = {"status": "not_connected", "note": "simulated customer never joined"}
+            ctx.shutdown(reason="sim callee did not join")
+            return
+        await asyncio.sleep(1.0)                    # let their mic track publish before we greet
+        agent.trunk = "sim"
+        await session.generate_reply(
+            instructions="The call was just answered. Greet them by name, say who you are and where you're calling from in one sentence, and ask if now is a good moment."
+        )
+    elif phone:
         # Outbound: dial through the SIP trunks in order. A carrier-side failure
         # (trunk auth, capacity, provider outage) falls through to the next trunk;
         # a callee-side result (busy, no answer, rejected) ends the job.

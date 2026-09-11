@@ -187,6 +187,10 @@ class Speaker:
         else:                                   # ElevenLabs — also the fallback for languages Piper has no voice for (Hindi)
             self.tts = elevenlabs.TTS(voice_id=voice_id, model="eleven_flash_v2_5", language=lang, streaming_latency=3)
             self.sample_rate = self.tts.sample_rate
+            try:
+                self.tts.prewarm()                # opens the TLS connection now, not on the first clause (~2 s otherwise)
+            except Exception:  # noqa: BLE001
+                pass
         self.source = rtc.AudioSource(self.sample_rate, 1, queue_size_ms=400)
         self.track = rtc.LocalAudioTrack.create_audio_track(name, self.source)
         self.publication: rtc.LocalTrackPublication | None = None
@@ -219,15 +223,31 @@ class Speaker:
             async for ev in self.tts.synthesize(text):
                 yield ev.frame
             return
-        # piper via the self-hosted server: one WAV per utterance, chunked into 20 ms frames
-        async with self.http.post(f"{INTERP_SERVER_URL}/tts", json={"text": text, "lang": self.lang},
-                                  timeout=aiohttp.ClientTimeout(total=8)) as r:
+        # piper via the self-hosted server: raw PCM streamed sentence by sentence; play as soon as the first arrives
+        async with self.http.post(f"{INTERP_SERVER_URL}/tts/stream", json={"text": text, "lang": self.lang},
+                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
             r.raise_for_status()
-            wav = await r.read()
-        pcm = wav[44:] if wav[:4] == b"RIFF" else wav
-        step = int(self.sample_rate * 0.02) * 2
-        for i in range(0, len(pcm) - step + 1, step):
-            yield rtc.AudioFrame(pcm[i:i + step], self.sample_rate, 1, step // 2)
+            sr = int(r.headers.get("X-Sample-Rate", self.sample_rate))
+            step = int(sr * 0.02) * 2                      # 20 ms frames
+            resampler = rtc.AudioResampler(sr, self.sample_rate, num_channels=1) if sr != self.sample_rate else None
+            buf = bytearray()
+
+            def frames_of(pcm: bytes):
+                f = rtc.AudioFrame(pcm, sr, 1, len(pcm) // 2)
+                return resampler.push(f) if resampler else [f]
+
+            async for chunk in r.content.iter_chunked(4096):
+                buf += chunk
+                while len(buf) >= step:
+                    for f in frames_of(bytes(buf[:step])):
+                        yield f
+                    del buf[:step]
+            if buf:
+                for f in frames_of(bytes(buf) + b"\x00" * (step - len(buf))):
+                    yield f
+            if resampler:
+                for f in resampler.flush():
+                    yield f
 
     async def _run(self):
         while True:
