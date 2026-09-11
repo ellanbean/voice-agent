@@ -133,6 +133,16 @@ def language_name(code: str | None) -> str | None:
     return LANGUAGE_NAMES.get(code.lower()[:2], code)
 
 
+# Deepgram nova-3 languages that can be pinned; anything else uses "multi" auto-detect (which mis-hears short
+# phrases badly — Hindi came back as French in testing — so we pin whenever the lead's language is known).
+DEEPGRAM_LANGS = {"en", "es", "fr", "de", "hi", "ru", "pt", "ja", "it", "nl", "sv", "da", "no", "fi", "pl", "cs", "ro", "hu", "el", "tr", "uk", "id", "ko", "zh"}
+
+
+def stt_language(lead: dict) -> str:
+    code = (lead.get("language") or "").lower()[:2]
+    return code if code in DEEPGRAM_LANGS else "multi"
+
+
 class SalesCaller(Agent):
     def __init__(self, lead: dict, ctx: JobContext, agent_name: str = "Daniel"):
         template = PROMPT_PATH.read_text(encoding="utf-8")
@@ -215,8 +225,10 @@ class SalesCaller(Agent):
         self.leaving_after_transfer = True
         # Daniel's voice is gone from here on: the hold agent (female IVR voice, customer's language) takes over.
         hold = HoldAgent(sales_agent=self, room=room, lang=lang, summary=summary)
-        ctx.session.update_agent(hold)              # RunContext owns the session; JobContext does not
-        return "Handover started. Say nothing further."
+        logger.info("handover: switching to hold line (lang=%s)", lang)
+        # Returning the new Agent from a tool is the supported handoff: the session drains this turn, then
+        # activates `hold` (its on_enter runs the ring queue). Calling update_agent from inside the tool is racy.
+        return hold, "Handover started. Say nothing further."
 
     @function_tool()
     async def end_call(self, ctx: RunContext) -> str:
@@ -252,10 +264,6 @@ class HoldAgent(Agent):
         self.summary = summary
         self.bg: BackgroundAudioPlayer | None = None
 
-    async def _say(self, key: str, **kw):
-        text = await phrases.get_or_translate(key, self.lang, self._translate)
-        await self.session.say(text, allow_interruptions=False, **kw)
-
     async def _translate(self, text: str, lang: str) -> str:
         """One-off LLM translation for languages phrases.py doesn't carry."""
         llm = self.parent.ctx.proc.userdata.get("llm") if hasattr(self.parent.ctx, "proc") else None
@@ -272,12 +280,29 @@ class HoldAgent(Agent):
                     out += chunk.delta.content
         return out
 
+    async def _say(self, key: str, **kw):
+        try:
+            text = await asyncio.wait_for(phrases.get_or_translate(key, self.lang, self._translate), 15)
+            logger.info("hold line says [%s/%s]: %s", key, self.lang, text)
+            await self.session.say(text, allow_interruptions=False, **kw)
+        except Exception as e:  # noqa: BLE001 — a missing phrase must not stall the queue
+            logger.warning("hold line could not say %s: %s", key, e)
+
     async def on_enter(self) -> None:
+        try:
+            await self._run_queue()
+        except Exception:  # noqa: BLE001
+            logger.exception("hold line crashed")
+            raise
+
+    async def _run_queue(self) -> None:
         # runs as soon as the hold agent takes over; the whole queue lives here
         ctx = self.parent.ctx
+        logger.info("hold line: on_enter (room %s, lang %s)", self.room, self.lang)
         try:
             self.bg = BackgroundAudioPlayer()
-            await self.bg.start(room=ctx.room, agent_session=self.session)
+            await asyncio.wait_for(self.bg.start(room=ctx.room, agent_session=self.session), 8)
+            logger.info("hold line: ringback player started")
         except Exception as e:  # noqa: BLE001 — no ringback is not fatal
             logger.warning("background audio unavailable: %s", e)
             self.bg = None
@@ -295,6 +320,8 @@ class HoldAgent(Agent):
             agent = await asyncio.to_thread(db.pick_available_agent, "agent_sales", tried)
             if not agent:
                 # nobody free right now: keep ringing, reassure every ~25 s, and re-check
+                if not tried and time.time() - last_reassure > 24:
+                    logger.info("hold line: no agent with status=available yet (sales/team_lead/admin)")
                 await asyncio.sleep(3)
                 if time.time() - last_reassure > 25:
                     await self._say("still_connecting")
@@ -436,7 +463,7 @@ async def entrypoint(ctx: JobContext):
         vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(
             model="nova-3",
-            language="multi",            # code-switching across Deepgram's 10 languages
+            language=stt_language(lead),  # the lead's language when known; "multi" (auto-detect) only as a fallback
             endpointing_ms=25,
             smart_format=True,
         ),
