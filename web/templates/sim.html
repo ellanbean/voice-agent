@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Simulator · into3 voice ops{% endblock %}
+{% block body %}
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.4/dist/livekit-client.umd.min.js"></script>
+<style>
+.simwrap{max-width:720px}
+.big{font-size:18px;padding:12px 22px}
+#log{font-family:var(--mono);font-size:12px;max-height:260px;overflow:auto}
+.who{display:inline-block;min-width:80px;color:var(--muted)}
+.hidden{display:none}
+</style>
+<div class="simwrap">
+<h1>Call simulator <span class="muted" style="font-size:13px;font-weight:400">you play the customer — no phone line needed</span></h1>
+
+<div class="card">
+  <p>This tab becomes the <b>customer</b>. Daniel calls "you", pitches, and hands over; keep an agent logged in and <b>available</b> on the Console in another browser (or a private window) to receive the handover — with a different working language than the customer to see the interpreter.</p>
+  <div class="row">
+    <div><label>Customer name</label><input id="name" value="Hans Müller"></div>
+    <div><label>Country</label><select id="country">
+      <option value="DE">Germany (de)</option><option value="FR">France (fr)</option><option value="ES">Spain (es)</option><option value="IT">Italy (it)</option>
+      <option value="NL">Netherlands (nl)</option><option value="PL">Poland (pl)</option><option value="SE">Sweden (sv)</option><option value="GB">UK (en)</option><option value="IN">India (hi)</option></select></div>
+    <div><label>Company</label><input id="company" value="Müller GmbH"></div>
+  </div>
+  <p style="margin-top:12px"><button class="big" id="btnStart" onclick="startCall()">Start call — Daniel calls me</button>
+     <button class="big danger hidden" id="btnHang" onclick="hangup()">Hang up</button>
+     <span class="muted" id="state"></span></p>
+  <p class="muted" style="font-size:13px">Use a headset. Speak in the customer's language. Daniel opens in that language; show interest ("das klingt gut, was kostet es?") and he hands you to the agent — you'll hear ringing, the IVR voice, then the agent through the interpreter.</p>
+</div>
+
+<div class="card"><h2 style="margin-top:0">What you're hearing</h2><div id="log"><span class="muted">Idle.</span></div></div>
+</div>
+
+<script>
+const LK = window.LivekitClient;
+let room = null, roomName = null;
+const log = (who, m) => { const el = document.getElementById('log'); if (el.firstElementChild && el.firstElementChild.tagName === 'SPAN') el.innerHTML = '';
+  el.innerHTML += `<div><span class="who">${new Date().toLocaleTimeString().slice(0,8)} ${who}</span>${m}</div>`; el.scrollTop = el.scrollHeight; };
+const api = async (path, body) => { const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})}); if (!r.ok) throw new Error(r.status+' '+await r.text()); return r.json(); };
+
+async function startCall(){
+  document.getElementById('btnStart').disabled = true; document.getElementById('state').textContent = 'starting…';
+  try {
+    const res = await api('/api/sim/start', { name: document.getElementById('name').value, country: document.getElementById('country').value, company: document.getElementById('company').value });
+    roomName = res.room;
+    room = new LK.Room({ adaptiveStream: false, dynacast: false });
+    room.on(LK.RoomEvent.ParticipantConnected, p => log('joined', p.identity + (p.name ? ' ('+p.name+')' : '')));
+    room.on(LK.RoomEvent.ParticipantDisconnected, p => log('left', p.identity));
+    room.on(LK.RoomEvent.TrackSubscribed, (track, pub, p) => { if (track.kind === 'audio') { const el = track.attach(); el.id = 'a-'+pub.trackSid; document.body.appendChild(el); log('audio', p.identity + (pub.trackName ? ' · '+pub.trackName : '')); } });
+    room.on(LK.RoomEvent.TrackUnsubscribed, (track, pub) => { const el = document.getElementById('a-'+pub.trackSid); if (el) el.remove(); });
+    room.on(LK.RoomEvent.Disconnected, () => { log('call', 'ended'); reset(); });
+    await room.connect(res.url, res.token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    document.getElementById('btnHang').classList.remove('hidden'); document.getElementById('state').textContent = 'in room ' + roomName + ' — waiting for Daniel…';
+    log('call', 'you are "callee" in ' + roomName + '. Daniel joins in a few seconds.');
+  } catch (e) { log('error', e.message); reset(); }
+}
+async function hangup(){ if (!roomName) return; try { await api(`/api/sim/${roomName}/hangup`); } catch(e){} if (room) { const r = room; room = null; await r.disconnect(); } reset(); }
+function reset(){ room = null; roomName = null; document.getElementById('btnStart').disabled = false; document.getElementById('btnHang').classList.add('hidden'); document.getElementById('state').textContent = ''; document.querySelectorAll('audio[id^="a-"]').forEach(a => a.remove()); }
+</script>
+{% endblock %}
