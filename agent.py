@@ -121,6 +121,18 @@ def pick_voice(lead: dict) -> tuple[str, str]:
 # The agent: persona + tools. Facts (offers, prices, availability) come from
 # tools, never from the model's imagination.
 # --------------------------------------------------------------------------- #
+LANGUAGE_NAMES = {"en": "English", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian", "pt": "Portuguese",
+                  "nl": "Dutch", "pl": "Polish", "sv": "Swedish", "da": "Danish", "no": "Norwegian", "fi": "Finnish",
+                  "cs": "Czech", "ro": "Romanian", "hu": "Hungarian", "el": "Greek", "hi": "Hindi", "tr": "Turkish"}
+
+
+def language_name(code: str | None) -> str | None:
+    """ISO code → name the model understands ("hi" alone reads as a greeting, not Hindi)."""
+    if not code:
+        return None
+    return LANGUAGE_NAMES.get(code.lower()[:2], code)
+
+
 class SalesCaller(Agent):
     def __init__(self, lead: dict, ctx: JobContext, agent_name: str = "Daniel"):
         template = PROMPT_PATH.read_text(encoding="utf-8")
@@ -129,7 +141,7 @@ class SalesCaller(Agent):
             lead_name=lead.get("name") or "there",
             lead_company=lead.get("company") or "",
             lead_country=lead.get("country") or "",
-            lead_language=lead.get("language") or "the language the person answers in",
+            lead_language=language_name(lead.get("language")) or "the language the person answers in",
             lead_source=lead.get("source") or "a website enquiry",
             campaign=lead.get("campaign") or "general",
             today=datetime.now(timezone.utc).strftime("%A %d %B %Y"),

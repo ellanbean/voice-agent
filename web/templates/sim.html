@@ -16,7 +16,7 @@
   <p>This tab becomes the <b>customer</b>. Daniel calls "you", pitches, and hands over; keep an agent logged in and <b>available</b> on the Console in another browser (or a private window) to receive the handover — with a different working language than the customer to see the interpreter.</p>
   <div class="row">
     <div><label>Customer name</label><input id="name" value="Hans Müller"></div>
-    <div><label>Country</label><select id="country">
+    <div><label>Country</label><select id="country" onchange="fillPersona()">
       <option value="DE">Germany (de)</option><option value="FR">France (fr)</option><option value="ES">Spain (es)</option><option value="IT">Italy (it)</option>
       <option value="NL">Netherlands (nl)</option><option value="PL">Poland (pl)</option><option value="SE">Sweden (sv)</option><option value="GB">UK (en)</option><option value="IN">India (hi)</option></select></div>
     <div><label>Company</label><input id="company" value="Müller GmbH"></div>
@@ -32,6 +32,9 @@
 
 <script>
 const LK = window.LivekitClient;
+const PERSONAS = { DE:['Hans Müller','Müller GmbH'], FR:['Claire Dubois','Dubois SARL'], ES:['Carlos García','García SL'], IT:['Marco Rossi','Rossi SRL'],
+  NL:['Jan de Vries','De Vries BV'], PL:['Anna Kowalska','Kowalska Sp. z o.o.'], SE:['Erik Andersson','Andersson AB'], GB:['James Smith','Smith Ltd'], IN:['Rahul Sharma','Sharma Enterprises'] };
+function fillPersona(){ const p = PERSONAS[document.getElementById('country').value]; if (p) { document.getElementById('name').value = p[0]; document.getElementById('company').value = p[1]; } }
 let room = null, roomName = null;
 const log = (who, m) => { const el = document.getElementById('log'); if (el.firstElementChild && el.firstElementChild.tagName === 'SPAN') el.innerHTML = '';
   el.innerHTML += `<div><span class="who">${new Date().toLocaleTimeString().slice(0,8)} ${who}</span>${m}</div>`; el.scrollTop = el.scrollHeight; };
