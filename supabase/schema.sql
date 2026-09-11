@@ -78,7 +78,8 @@ alter table do_not_call enable row level security;
 alter table callbacks enable row level security;
 
 -- ---------------------------------------------------------------- a view for humans
-create or replace view lead_board as
+drop view if exists lead_board;
+create view lead_board as
 select l.id, l.name, l.phone, l.country, l.campaign, l.status, l.attempts, l.next_attempt, l.last_outcome,
        (select count(*) from calls c where c.lead_id = l.id) as calls,
        (select max(ended_at) from calls c where c.lead_id = l.id) as last_call
@@ -167,7 +168,8 @@ create index if not exists transfers_agent_idx on transfers (to_agent_id, status
 alter table transfers enable row level security;
 
 -- live floor view for team leads
-create or replace view floor as
+drop view if exists floor;
+create view floor as
 select p.id, p.full_name, p.email, p.role, p.language, p.status, p.status_since, p.current_room,
        c.phone as customer_phone, c.lead_name as customer_name, c.language as customer_language, c.started_at as call_started_at
 from profiles p
