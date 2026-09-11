@@ -105,6 +105,12 @@ async def one_pass(lk: api.LiveKitAPI, dry_run: bool, minute_budget: list[float]
     stale = db.reset_stale_calling()
     if stale:
         log.warning("reset %d lead(s) stuck in 'calling'", stale)
+    closed = db.close_stale_calls()
+    if closed:
+        log.warning("closed %d stale call row(s) as abandoned", closed)
+    if not (os.getenv("SIP_OUTBOUND_TRUNK_IDS") or os.getenv("SIP_OUTBOUND_TRUNK_ID")):
+        log.info("no SIP trunk configured (SIP_OUTBOUND_TRUNK_IDS) — dialer idle; the simulator still works")
+        return 0
     active = db.active_call_count()
     slots = MAX_CONCURRENT - active
     if slots <= 0:

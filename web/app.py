@@ -497,7 +497,7 @@ async def api_sim_start(payload: dict, user: dict = Depends(require("team_lead")
     language = (payload.get("language") or COUNTRY_LANG.get(country, "en")).lower()[:2]
     phone = f"+000{secrets.randbelow(10**9):09d}"                     # unique fake number per run
     lead = db.upsert_lead({"phone": phone, "name": name, "country": country, "language": language, "source": "simulator",
-                           "consent_at": datetime.now(timezone.utc).isoformat(), "campaign": "sim", "status": "calling"})
+                           "consent_at": datetime.now(timezone.utc).isoformat(), "campaign": "sim", "status": "sim"})
     room = f"sim-{secrets.token_hex(4)}"
     meta = {"sim": True, "phone": phone, "lead_id": lead["id"], "name": name, "country": country, "language": language,
             "source": "simulator", "campaign": "sim", "company": payload.get("company") or ""}

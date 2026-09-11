@@ -523,7 +523,12 @@ async def entrypoint(ctx: JobContext):
         # Outbound: dial through the SIP trunks in order. A carrier-side failure
         # (trunk auth, capacity, provider outage) falls through to the next trunk;
         # a callee-side result (busy, no answer, rejected) ends the job.
-        answered = await dial_with_failover(ctx, phone, lead, agent)
+        try:
+            answered = await dial_with_failover(ctx, phone, lead, agent)
+        except RuntimeError as e:                   # no trunk configured: close the call row cleanly
+            agent.outcome = {"status": "not_connected", "message": str(e)}
+            logger.error("cannot dial: %s", e)
+            answered = False
         if not answered:
             ctx.shutdown(reason="call not connected")
             return

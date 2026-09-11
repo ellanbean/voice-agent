@@ -62,6 +62,7 @@ def due_leads(limit: int, countries: list[str] | None = None) -> list[dict]:
     q = (
         client().table("leads").select("*")
         .in_("status", ["new", "retry"])
+        .neq("campaign", "sim")                   # simulator leads are never dialed
         .lte("next_attempt", _now())
         .not_.is_("consent_at", "null")
         .order("next_attempt")
@@ -139,6 +140,19 @@ def active_call_count(max_age_minutes: int = 30) -> int:
         .is_("ended_at", "null").gte("started_at", since).execute()
     )
     return r.count or 0
+
+
+def close_stale_calls(max_age_minutes: int = 120) -> int:
+    """Calls still open long after they started (worker crashed, webhook missing) get closed as 'abandoned'."""
+    since = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+    r = (
+        client().table("calls").update({"ended_at": _now(), "stage": "ended", "status": "abandoned"})
+        .is_("ended_at", "null").lt("started_at", since).execute()
+    )
+    rows = r.data or []
+    for c in rows:
+        client().table("call_segments").update({"ended_at": _now()}).eq("call_id", c["id"]).is_("ended_at", "null").execute()
+    return len(rows)
 
 
 def reset_stale_calling(max_age_minutes: int = 30) -> int:
