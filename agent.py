@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import logging
 import os
 import time
@@ -205,6 +206,22 @@ class SalesCaller(Agent):
         if db.enabled() and phone:
             await asyncio.to_thread(db.add_dnc, phone, reason, "agent")
         return "Recorded. Thank them briefly and end the call."
+
+    # Hermes occasionally leaks a tool call as plain text ("tool_call get_current_offer {...}") instead of using
+    # the structured channel; without this the TTS reads it aloud. Drop any speech chunk that looks like that.
+    _TOOL_LEAK = re.compile(r"(<tool_call|</tool_call|tool_call|\{\s*\"name\"\s*:|\"arguments\"\s*:|<\|im_|<function)", re.I)
+
+    async def tts_node(self, text, model_settings):
+        async def clean():
+            muted = False
+            async for chunk in text:
+                if muted or self._TOOL_LEAK.search(chunk):
+                    if not muted:
+                        logger.warning("suppressed tool-call text from speech: %r", chunk[:80])
+                    muted = True
+                    continue
+                yield chunk
+        return Agent.default.tts_node(self, clean(), model_settings)
 
     @function_tool()
     async def transfer_to_sales(self, ctx: RunContext, summary: str, customer_language: str) -> str:
@@ -389,8 +406,12 @@ def outbound_trunk_ids() -> list[str]:
 CARRIER_FAILURE_CODES = {401, 403, 407, 500, 502, 503, 504}
 
 
+SIP_STRIP_PLUS = os.getenv("SIP_STRIP_PLUS", "1") == "1"   # Plivo (and Zadarma) want E.164 digits without the leading "+"
+
+
 async def dial_with_failover(ctx: JobContext, phone: str, lead: dict, agent: "SalesCaller") -> bool:
     trunks = outbound_trunk_ids()
+    dial_to = phone.lstrip("+") if SIP_STRIP_PLUS else phone
     last_error: dict = {}
     for i, trunk_id in enumerate(trunks):
         try:
@@ -398,7 +419,7 @@ async def dial_with_failover(ctx: JobContext, phone: str, lead: dict, agent: "Sa
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
                     sip_trunk_id=trunk_id,
-                    sip_call_to=phone,
+                    sip_call_to=dial_to,
                     participant_identity="callee",
                     participant_name=lead.get("name") or phone,
                     wait_until_answered=True,

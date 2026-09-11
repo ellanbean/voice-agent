@@ -174,7 +174,7 @@ select p.id, p.full_name, p.email, p.role, p.language, p.status, p.status_since,
        c.phone as customer_phone, c.lead_name as customer_name, c.language as customer_language, c.started_at as call_started_at
 from profiles p
 left join calls c on c.room = p.current_room
-where p.role in ('agent_sales','agent_payments','team_lead');
+where p.role in ('agent_sales','agent_payments','team_lead','admin');
 
 -- ---------------------------------------------------------------- agent priority + details
 alter table profiles add column if not exists priority int not null default 50;   -- 1 = first to receive calls; team lead sets it
@@ -200,7 +200,7 @@ select p.id, p.full_name, p.email, p.role, p.language, p.priority, p.status, p.s
        c.phone as customer_phone, c.lead_name as customer_name, c.language as customer_language, c.started_at as call_started_at
 from profiles p
 left join calls c on c.room = p.current_room
-where p.role in ('agent_sales','agent_payments','team_lead');
+where p.role in ('agent_sales','agent_payments','team_lead','admin');
 
 -- ---------------------------------------------------------------- interpreter (real-time translation) telemetry
 alter table calls add column if not exists interp_stats jsonb;         -- per-call summary: p50/p95 latency, backends, languages

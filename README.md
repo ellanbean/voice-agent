@@ -68,6 +68,17 @@ lk sip outbound create sip/zadarma-outbound-trunk.json     # → ST_xxxx
 # .env: SIP_OUTBOUND_TRUNK_IDS=ST_xxxx
 ```
 
+
+### Plivo (Zentrunk) as the outbound carrier
+
+1. Plivo console → **SIP Trunking (Zentrunk)** → **Credentials** → create one (username 5–20 alphanumeric; password 5–20 chars with at least one of `~!@#$%^&*()_+`).
+2. **SIP Trunking → Outbound Trunks → Create**: name it, auth = *Credentials list* (never IP ACL — LiveKit dials from many IPs), pick the credential, save. Copy the **Termination SIP Domain** (`<id>.zt.plivo.com`).
+3. Buy/verify a Plivo number to use as caller ID (Phone Numbers). On a trial account you can only call numbers verified under *Sandbox numbers*.
+4. Fill `sip/plivo-outbound-trunk.json` (address = termination domain, numbers = your Plivo number with `+`, the credential username/password) and register it:
+   `python sip_setup.py sip/plivo-outbound-trunk.json` → prints `ST_…`.
+5. `.env` and Heroku: `SIP_OUTBOUND_TRUNK_IDS=ST_…`, `SIP_STRIP_PLUS=1`. Restart the worker and the dialer.
+6. Calling India (or from an Indian number) requires Plivo *region pinning*; EU/UK destinations need none.
+
 **Adding / swapping a carrier later (Plivo, Twilio, anyone):** every carrier gives the same four values — SIP host, username, password, a number you own. Put them in `sip/route2-outbound-trunk.json`, choose *credentials* auth on the carrier side (never IP-ACL — LiveKit dials from many IPs), register with `lk sip outbound create`, and set `SIP_OUTBOUND_TRUNK_IDS=ST_primary,ST_backup`. Order = priority; the worker fails over on carrier-side SIP errors (401/403/407/5xx) and never re-dials a busy/no-answer callee. Test a new trunk alone first (`SIP_OUTBOUND_TRUNK_IDS=ST_new`, call your own mobile), then restore the list. Debug via the call's `outcome.sip_status` in Supabase: 401/403 = credentials or caller-ID not allowed; 503 = carrier capacity/balance/suspension; 404/484 = bad number; 486/480/603 = the callee.
 
 ## 4. First real call (from your laptop)
