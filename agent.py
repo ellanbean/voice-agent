@@ -203,7 +203,7 @@ class SalesCaller(Agent):
         self.leaving_after_transfer = True
         # Daniel's voice is gone from here on: the hold agent (female IVR voice, customer's language) takes over.
         hold = HoldAgent(sales_agent=self, room=room, lang=lang, summary=summary)
-        self.ctx.session.update_agent(hold)
+        ctx.session.update_agent(hold)              # RunContext owns the session; JobContext does not
         return "Handover started. Say nothing further."
 
     @function_tool()

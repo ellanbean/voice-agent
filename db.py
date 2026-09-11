@@ -311,7 +311,8 @@ def pick_available_agent(role: str, exclude: list[str] | None = None) -> dict | 
     """Best available agent of the role: lowest priority number first (team lead
     sets it; 1 = top), then whoever has been waiting longest. No language matching —
     the interpreter bridges customer and agent languages."""
-    q = client().table("profiles").select("*").eq("role", role).eq("status", "available")
+    # team leads and admins who go available take handovers of any kind
+    q = client().table("profiles").select("*").in_("role", [role, "team_lead", "admin"]).eq("status", "available")
     if exclude:
         q = q.not_.in_("id", exclude)
     r = q.order("priority").order("status_since").limit(1).execute().data
