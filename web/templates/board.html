@@ -42,7 +42,7 @@
 
 <div class="card">
   <div class="tbl"><table>
-    <tr><th>Name</th><th>Phone</th><th>Country</th><th>Campaign</th><th>Status</th><th>Attempts</th><th>Calls</th><th>Next attempt</th><th>Last outcome</th></tr>
+    <tr><th>Name</th><th>Phone</th><th>Country</th><th>Campaign</th><th>Status</th><th>Attempts</th><th>Calls</th><th>Next attempt</th><th>Last outcome</th><th></th></tr>
     {% for r in rows %}
     <tr>
       <td>{{ r.name or '—' }}</td>
@@ -54,9 +54,10 @@
       <td>{{ r.calls }}</td>
       <td class="muted">{{ (r.next_attempt or '')[:16].replace('T',' ') }}</td>
       <td class="muted">{{ r.last_outcome or '' }}</td>
+      <td>{% if me.get('role') in ('team_lead','admin') and r.status not in ('calling', 'dnc') %}<form method="post" action="/leads/{{ r.id }}/call-now" style="display:inline"><button class="ghost" style="padding:2px 8px;font-size:12px" title="Skip the back-off: dial on the next pass">Call now</button></form>{% endif %}</td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="muted">No leads yet. <a href="/upload">Upload a list</a>.</td></tr>
+    <tr><td colspan="10" class="muted">No leads yet. <a href="/upload">Upload a list</a>.</td></tr>
     {% endfor %}
   </table></div>
 </div>

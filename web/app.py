@@ -484,6 +484,13 @@ async def api_transfer_accept(transfer_id: str, user: dict = Depends(require("ag
 
 
 # ---- simulator: a browser plays the customer so the whole flow runs without a SIP trunk
+@app.post("/leads/{lead_id}/call-now")
+def lead_call_now(lead_id: str, user: dict = Depends(require("team_lead"))):
+    """Board button: dial this lead on the dialer's next pass (skips the retry back-off)."""
+    db.call_now(lead_id)
+    return RedirectResponse("/?called=1", status_code=303)
+
+
 @app.get("/sim", response_class=HTMLResponse)
 def sim_page(request: Request, user: dict = Depends(require("team_lead"))):
     return templates.TemplateResponse(request, "sim.html", {"livekit_url": os.getenv("LIVEKIT_URL", "")})

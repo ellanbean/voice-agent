@@ -77,7 +77,12 @@ lk sip outbound create sip/zadarma-outbound-trunk.json     # → ST_xxxx
 4. Fill `sip/plivo-outbound-trunk.json` (address = termination domain, numbers = your Plivo number with `+`, the credential username/password) and register it:
    `python sip_setup.py sip/plivo-outbound-trunk.json` → prints `ST_…`.
 5. `.env` and Heroku: `SIP_OUTBOUND_TRUNK_IDS=ST_…`, `SIP_STRIP_PLUS=1`. Restart the worker and the dialer.
-6. Calling India (or from an Indian number) requires Plivo *region pinning*; EU/UK destinations need none.
+6. **Calling India**: Indian rules require signalling *and* media to originate in India, or Plivo rejects with
+   `403 Domestic Anchored Terms Not Met`. Three things together: (a) caller ID = a Plivo **India** number,
+   (b) region pinning = India on the Plivo trunk, (c) `"destination_country": "in"` in the LiveKit trunk JSON
+   (LiveKit then dials from its India region). Use a separate trunk JSON per destination country
+   (`plivo-india.json` with `in`, `plivo-eu.json` without) and list both in `SIP_OUTBOUND_TRUNK_IDS`.
+   EU/UK destinations need none of this.
 
 **Adding / swapping a carrier later (Plivo, Twilio, anyone):** every carrier gives the same four values — SIP host, username, password, a number you own. Put them in `sip/route2-outbound-trunk.json`, choose *credentials* auth on the carrier side (never IP-ACL — LiveKit dials from many IPs), register with `lk sip outbound create`, and set `SIP_OUTBOUND_TRUNK_IDS=ST_primary,ST_backup`. Order = priority; the worker fails over on carrier-side SIP errors (401/403/407/5xx) and never re-dials a busy/no-answer callee. Test a new trunk alone first (`SIP_OUTBOUND_TRUNK_IDS=ST_new`, call your own mobile), then restore the list. Debug via the call's `outcome.sip_status` in Supabase: 401/403 = credentials or caller-ID not allowed; 503 = carrier capacity/balance/suspension; 404/484 = bad number; 486/480/603 = the callee.
 

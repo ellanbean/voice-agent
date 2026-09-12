@@ -48,6 +48,11 @@ def upsert_lead(row: dict) -> dict:
     return r.data[0]
 
 
+def call_now(lead_id: str) -> None:
+    """Team lead override: put the lead at the front of the dialer queue regardless of back-off."""
+    client().table("leads").update({"status": "new", "next_attempt": _now()}).eq("id", lead_id).execute()
+
+
 def is_dnc(phone: str) -> bool:
     r = client().table("do_not_call").select("phone").eq("phone", phone).limit(1).execute()
     return bool(r.data)
