@@ -5,5 +5,4 @@ __pycache__/
 .venv/
 venv/
 *.wav
-
-sip/plivo-outbound-trunk.json
+data/tts_cache/

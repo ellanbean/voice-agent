@@ -55,6 +55,7 @@ from livekit.plugins import deepgram, elevenlabs, openai, silero
 import db
 import phrases
 import runpod_ctl
+import voice_kit
 
 load_dotenv()
 logger = logging.getLogger("sales-agent")
@@ -95,8 +96,15 @@ def resolve_llm_base_url() -> str:
 DEFAULT_VOICES = "Daniel:onwK4e9ZLuTAKqWW03F9,Adam:pNInz6obpgDQGcFmaJgB,George:JBFqnCBsd6RMkjVDRZzb"
 
 
-def voice_roster() -> list[tuple[str, str]]:
-    raw = os.getenv("ELEVEN_VOICES") or DEFAULT_VOICES
+def voice_roster(lang: str | None = None, country: str | None = None) -> list[tuple[str, str]]:
+    """Most specific wins: VOICE_GB (country) → VOICE_EN (language) → ELEVEN_VOICES → built-in default.
+    Each value is "Name:<voice_id>", comma-separated for rotation; Name is the persona in the prompt."""
+    raw = ""
+    if country:
+        raw = os.getenv(f"VOICE_{country[:2].upper()}", "")
+    if not raw and lang:
+        raw = os.getenv(f"VOICE_{lang[:2].upper()}", "")
+    raw = raw or os.getenv("ELEVEN_VOICES") or DEFAULT_VOICES
     roster = []
     for item in raw.split(","):
         name, _, vid = item.strip().partition(":")
@@ -108,7 +116,7 @@ def voice_roster() -> list[tuple[str, str]]:
 
 
 def pick_voice(lead: dict) -> tuple[str, str]:
-    roster = voice_roster()
+    roster = voice_roster(lead.get("language"), lead.get("country"))
     forced = lead.get("voice")  # metadata can pin one, e.g. for a manual test call
     for name, vid in roster:
         if forced and forced.lower() in (name.lower(), vid):
@@ -161,6 +169,7 @@ class SalesCaller(Agent):
         self.lead = lead
         self.ctx = ctx
         self.outcome: dict = {"status": "in_progress"}
+        self.bg: BackgroundAudioPlayer | None = None      # think-time fillers (voice_kit), if attached
         self.voice: str = agent_name
         self.trunk: str | None = None
         self.handover: dict | None = None          # set when a human accepted the transfer
@@ -272,7 +281,7 @@ class HoldAgent(Agent):
     def __init__(self, sales_agent: "SalesCaller", room: str, lang: str, summary: str):
         super().__init__(
             instructions="You are an automated hold line. Never speak on your own; all speech is scripted.",
-            tts=elevenlabs.TTS(voice_id=IVR_VOICE_ID, model="eleven_flash_v2_5"),
+            tts=voice_kit.make_tts(IVR_VOICE_ID, lang),
             llm=None, stt=None, vad=None, turn_handling={"turn_detection": "manual"},
         )
         self.parent = sales_agent
@@ -301,7 +310,7 @@ class HoldAgent(Agent):
         try:
             text = await asyncio.wait_for(phrases.get_or_translate(key, self.lang, self._translate), 15)
             logger.info("hold line says [%s/%s]: %s", key, self.lang, text)
-            await self.session.say(text, allow_interruptions=False, **kw)
+            await voice_kit.say_cached(self.session, self.tts, IVR_VOICE_ID, text, allow_interruptions=False, **kw)
         except Exception as e:  # noqa: BLE001 — a missing phrase must not stall the queue
             logger.warning("hold line could not say %s: %s", key, e)
 
@@ -316,6 +325,12 @@ class HoldAgent(Agent):
         # runs as soon as the hold agent takes over; the whole queue lives here
         ctx = self.parent.ctx
         logger.info("hold line: on_enter (room %s, lang %s)", self.room, self.lang)
+        if self.parent.bg is not None:
+            try:
+                await self.parent.bg.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self.parent.bg = None
         try:
             self.bg = BackgroundAudioPlayer()
             await asyncio.wait_for(self.bg.start(room=ctx.room, agent_session=self.session), 8)
@@ -474,7 +489,8 @@ async def entrypoint(ctx: JobContext):
 
     await ctx.connect()
 
-    llm_base_url = resolve_llm_base_url()
+    # RunPod lookup is a blocking HTTPS call (~700 ms): never on the audio loop. Cached for 60 s in resolve_llm_base_url.
+    llm_base_url = await asyncio.to_thread(resolve_llm_base_url)
     logger.info("vLLM endpoint: %s", llm_base_url)
 
     voice_name, voice_id = pick_voice(lead)
@@ -493,17 +509,13 @@ async def entrypoint(ctx: JobContext):
             base_url=llm_base_url,
             api_key=os.environ["VLLM_API_KEY"],
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.6")),
-            max_completion_tokens=int(os.getenv("LLM_MAX_TOKENS", "160")),
+            max_completion_tokens=int(os.getenv("LLM_MAX_TOKENS", "90")),   # 1-2 spoken sentences; long turns = long waits
         ),
-        tts=elevenlabs.TTS(
-            voice_id=voice_id,
-            model="eleven_flash_v2_5",   # lowest-latency multilingual model
-            streaming_latency=3,
-        ),
+        tts=voice_kit.make_tts(voice_id, lead.get("language")),   # Turbo v2.5 + expressive settings (see voice_kit.py)
         turn_handling={
             # Hosted turn detector (runs on LiveKit Cloud): multilingual, no local model.
             "turn_detection": inference.TurnDetector(),
-            "endpointing": {"min_delay": 0.35, "max_delay": 2.5},
+            "endpointing": {"min_delay": float(os.getenv("TURN_MIN_DELAY", "0.25")), "max_delay": 2.0},
             "preemptive_generation": {"enabled": True},
         },
         user_away_timeout=20.0,          # silence → we re-engage or hang up
@@ -564,6 +576,22 @@ async def entrypoint(ctx: JobContext):
             ctx.shutdown(reason="callee disconnected")
 
     await session.start(agent, room=ctx.room)
+
+    # Think-time fillers in Daniel's own voice ("Sure.", "Right, so…"): synthesised in the background on the first
+    # call per dyno, cached on disk after that. Attached as BackgroundAudioPlayer thinking sounds, so they play only
+    # while the LLM is working and are cut the moment the real answer starts.
+    async def attach_fillers():
+        try:
+            cfgs = await voice_kit.filler_configs(session.tts, voice_id, lead.get("language") or "en")
+            if cfgs and ctx.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:
+                bg = BackgroundAudioPlayer(thinking_sound=cfgs)
+                await bg.start(room=ctx.room, agent_session=session)
+                agent.bg = bg
+                logger.info("fillers ready: %d clips", len(cfgs))
+        except Exception as e:  # noqa: BLE001 — fillers are polish, never fatal
+            logger.warning("fillers unavailable: %s", e)
+    if voice_kit.FILLERS_ON:
+        asyncio.create_task(attach_fillers())
 
     if meta.get("sim"):
         # Simulator: no SIP. A browser joins as "callee" (web /sim page) and plays the customer.

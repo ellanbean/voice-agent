@@ -62,9 +62,10 @@ INTERP_SERVER_URL = os.getenv("INTERP_SERVER_URL", "").rstrip("/")      # self-h
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "")
 VOICE_TO_CUSTOMER = os.getenv("INTERP_VOICE_TO_CUSTOMER", "nPczCjzI2devNBz1zQrb")   # ElevenLabs "Brian" — not Daniel, so the human sounds like a new person
 VOICE_TO_AGENT = os.getenv("INTERP_VOICE_TO_AGENT", "Xb7hH8MSUJpSbSDYk0k2")         # ElevenLabs "Alice"
-ENDPOINTING_MS = int(os.getenv("INTERP_ENDPOINTING_MS", "300"))     # silence before a clause is final (latency vs. clause completeness)
+TTS_SPEED = float(os.getenv("INTERP_TTS_SPEED", "1.1"))              # ElevenLabs 0.7–1.2
+ENDPOINTING_MS = int(os.getenv("INTERP_ENDPOINTING_MS", "250"))     # silence before a clause is final (latency vs. clause completeness)
 EARCON = os.getenv("INTERP_EARCON", "1") == "1"
-EARCON_AFTER_MS = int(os.getenv("INTERP_EARCON_AFTER_MS", "600"))   # play the soft tick only if the translation is later than this
+EARCON_AFTER_MS = int(os.getenv("INTERP_EARCON_AFTER_MS", "1200"))  # soft tick only if NO translated audio has started this long after the clause was final
 MERGE_BACKLOG = int(os.getenv("INTERP_MERGE_BACKLOG", "3"))         # degrade: merge queued segments into one TTS call when we fall behind
 PIPER_LANGS = set(os.getenv("PIPER_LANGS", "en,de,fr,es,it,pt,nl,pl,sv,da,no,fi,cs,ro,hu,el,tr,uk,ru").split(","))
 CUSTOMER_IDENTITY = os.getenv("CALLEE_IDENTITY", "callee")
@@ -185,7 +186,9 @@ class Speaker:
         if TTS_BACKEND == "piper" and INTERP_SERVER_URL and lang in PIPER_LANGS:
             self.sample_rate = int(os.getenv("PIPER_SAMPLE_RATE", "22050"))
         else:                                   # ElevenLabs — also the fallback for languages Piper has no voice for (Hindi)
-            self.tts = elevenlabs.TTS(voice_id=voice_id, model="eleven_flash_v2_5", language=lang, streaming_latency=3)
+            # slightly brisk delivery: the listener waits for the whole sentence, so 10 % faster speech is ~10 % less lag
+            self.tts = elevenlabs.TTS(voice_id=voice_id, model="eleven_flash_v2_5", language=lang, streaming_latency=3,
+                                      voice_settings=elevenlabs.VoiceSettings(stability=0.5, similarity_boost=0.75, speed=TTS_SPEED))
             self.sample_rate = self.tts.sample_rate
             try:
                 self.tts.prewarm()                # opens the TLS connection now, not on the first clause (~2 s otherwise)
@@ -306,6 +309,7 @@ class Lane:
         self.stats = LaneStats()
         self.context: dict[str, list[tuple[str, str]]] = {t: [] for t, _ in targets}
         self.seg = 0
+        self.last_audio_seg = 0        # highest segment id whose translated audio has started (for the late-earcon check)
         self.mt_queue: asyncio.Queue[tuple[int, str, float]] = asyncio.Queue()
         self.tasks: list[asyncio.Task] = []
         self.stt_stream = None
@@ -317,7 +321,7 @@ class Lane:
         self.audio_stream = rtc.AudioStream(track, sample_rate=16000, num_channels=1)
         if STT_BACKEND == "deepgram":
             model = "nova-3" if self.src_lang in ("en", "de", "fr", "es", "it", "pt", "nl", "hi", "ru", "ja", "multi") else "nova-2-general"
-            stt = deepgram.STT(model=model, language=self.src_lang, interim_results=True, smart_format=True,
+            stt = deepgram.STT(model=model, language=self.src_lang, interim_results=True, smart_format=False,   # smart_format turned a phone number into clock times
                                endpointing_ms=ENDPOINTING_MS, sample_rate=16000, filler_words=False)
             self.stt_stream = stt.stream()
             self.tasks.append(asyncio.create_task(self._pump_deepgram()))
@@ -350,8 +354,6 @@ class Lane:
                     self._on_final(text)
             elif ev.type == lk_stt.SpeechEventType.END_OF_SPEECH:
                 self.interp.notify({"type": "speaking", "lane": self.label, "who": self.src_identity, "on": False})
-                for _, spk in self.targets:
-                    asyncio.get_running_loop().call_later(EARCON_AFTER_MS / 1000, lambda s=spk: asyncio.create_task(s.play_earcon()))
 
     async def _whisper_ws(self):
         """Self-hosted faster-whisper on RunPod (interp_server): 16 kHz PCM in, JSON finals out."""
@@ -377,6 +379,16 @@ class Lane:
     def _on_final(self, text: str):
         self.seg += 1
         self.mt_queue.put_nowait((self.seg, text, time.monotonic()))
+        if EARCON:
+            seg_id = self.seg
+            for _, spk in self.targets:
+                asyncio.get_running_loop().call_later(EARCON_AFTER_MS / 1000, self._earcon_if_late, seg_id, spk)
+
+    def _earcon_if_late(self, seg_id: int, spk: "Speaker"):
+        """Degradation signal only: the clause was final EARCON_AFTER_MS ago and nothing of it (or anything later)
+        has reached the listener yet, and the speaker is silent — so they know a translation is still coming."""
+        if self.last_audio_seg < seg_id and not spk.busy and spk.queue.empty():
+            asyncio.create_task(spk.play_earcon())
 
     # ---- translate concurrently, deliver strictly in order to the speaker(s)
     async def _translate_loop(self):
@@ -420,6 +432,7 @@ class Lane:
 
     def _make_first_audio_cb(self, tgt: str, backend: str):
         def cb(utt: Utterance, t_first: float, tts_ms: int):
+            self.last_audio_seg = max(self.last_audio_seg, utt.seg_id)
             total = int((t_first - utt.t_final) * 1000)
             mt_ms = int((utt.t_mt_done - utt.t_final) * 1000)
             queued_ms = max(0, total - mt_ms - tts_ms)

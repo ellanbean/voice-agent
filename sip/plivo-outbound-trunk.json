@@ -1,0 +1,11 @@
+{
+  "trunk": {
+    "name": "plivo-outbound",
+    "address": "42237440231557100.zt.plivo.com",
+    "numbers": ["+918031321385"],
+    "auth_username": "into3",
+    "auth_password": "Business@1199",
+    "destination_country": "in",
+    "transport": "SIP_TRANSPORT_TCP"
+  }
+}
