@@ -133,6 +133,8 @@ async def one_pass(lk: api.LiveKitAPI, dry_run: bool, minute_budget: list[float]
             break
 
         ok, why = in_calling_window(lead)
+        if lead.get("status") == "manual":
+            ok, why = True, "manual call-now override"
         if not ok:
             log.debug("skip %s: %s", lead["phone"], why)
             continue

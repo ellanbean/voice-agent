@@ -50,7 +50,7 @@ def upsert_lead(row: dict) -> dict:
 
 def call_now(lead_id: str) -> None:
     """Team lead override: put the lead at the front of the dialer queue regardless of back-off."""
-    client().table("leads").update({"status": "new", "next_attempt": _now()}).eq("id", lead_id).execute()
+    client().table("leads").update({"status": "manual", "next_attempt": _now()}).eq("id", lead_id).execute()
 
 
 def is_dnc(phone: str) -> bool:
@@ -66,7 +66,7 @@ def due_leads(limit: int, countries: list[str] | None = None) -> list[dict]:
     """Leads the dialer may call now: status new/retry, next_attempt passed, consent recorded."""
     q = (
         client().table("leads").select("*")
-        .in_("status", ["new", "retry"])
+        .in_("status", ["new", "retry", "manual"])   # manual = "Call now" from the Board: dialed regardless of hours
         .neq("campaign", "sim")                   # simulator leads are never dialed
         .lte("next_attempt", _now())
         .not_.is_("consent_at", "null")

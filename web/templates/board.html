@@ -54,7 +54,7 @@
       <td>{{ r.calls }}</td>
       <td class="muted">{{ (r.next_attempt or '')[:16].replace('T',' ') }}</td>
       <td class="muted">{{ r.last_outcome or '' }}</td>
-      <td>{% if me.get('role') in ('team_lead','admin') and r.status not in ('calling', 'dnc') %}<form method="post" action="/leads/{{ r.id }}/call-now" style="display:inline"><button class="ghost" style="padding:2px 8px;font-size:12px" title="Skip the back-off: dial on the next pass">Call now</button></form>{% endif %}</td>
+      <td>{% if me.get('role') in ('team_lead','admin') and r.status not in ('calling', 'dnc') %}<form method="post" action="/leads/{{ r.id }}/call-now" style="display:inline"><button class="ghost" style="padding:2px 8px;font-size:12px" title="Dial on the next pass — ignores back-off and calling hours">Call now</button></form>{% endif %}</td>
     </tr>
     {% else %}
     <tr><td colspan="10" class="muted">No leads yet. <a href="/upload">Upload a list</a>.</td></tr>
